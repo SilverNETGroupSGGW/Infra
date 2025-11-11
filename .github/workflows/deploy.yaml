@@ -28,6 +28,7 @@ jobs:
               with:
                   username: silver
                   host: quicksilver
+                  password: TAILSCALE_MANAGED
                   script: |
                       # Configure git authentication
                       git config credential.helper store
