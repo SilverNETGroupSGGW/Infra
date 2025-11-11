@@ -4,8 +4,15 @@ on:
     push:
         branches:
             - main
-    repository_dispatch:
-        types: [deploy]
+    workflow_call:
+        inputs:
+            image:
+                description: "Optional Docker image to deploy (format: ghcr.io/owner/repo[:tag])"
+                required: false
+                type: string
+        secrets:
+            REPO_GITHUB_TOKEN:
+                required: true
 
 concurrency:
     group: deploy-docker-compose
@@ -31,6 +38,7 @@ jobs:
                   password: TAILSCALE_MANAGED
                   script: |
                       set -e
+
                       # Configure git authentication
                       git config --global credential.helper store
                       echo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
@@ -45,9 +53,11 @@ jobs:
                       git pull
 
                       # Login to GitHub Container Registry
-                      echo "${{ github.event.client_payload.GITHUB_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+                      echo "${{ secrets.REPO_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
                       # Pull and deploy services
-                      docker compose pull ${{ github.event.client_payload.image || '' }}
+                      if [ -n "${{ inputs.image }}" ]; then
+                              docker pull "${{ inputs.image }}"
+                      fi
                       docker compose up -d
                       docker image prune -f
