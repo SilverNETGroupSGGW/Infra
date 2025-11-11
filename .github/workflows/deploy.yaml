@@ -31,7 +31,7 @@ jobs:
                   password: TAILSCALE_MANAGED
                   script: |
                       # Configure git authentication
-                      git config credential.helper store
+                      git config --global credential.helper store
                       echo "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com" > ~/.git-credentials
 
                       if [ ! -d ~/Infra ]; then
