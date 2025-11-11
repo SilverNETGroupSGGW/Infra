@@ -30,7 +30,7 @@ jobs:
                   host: quicksilver
                   password: TAILSCALE_MANAGED
                   script: |
-                      set -e
+                      set -ex
 
                       # Configure git authentication
                       git config --global credential.helper store
