@@ -46,7 +46,7 @@ jobs:
                       git pull
 
                       # Login to GitHub Container Registry
-                      echo "${{ github.event.client_payload.GITHUB_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+                      echo "${{ secrets.PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
                       # Pull and deploy services
                       IMAGE="${{ github.event.client_payload.image }}"
