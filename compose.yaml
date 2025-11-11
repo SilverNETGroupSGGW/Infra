@@ -11,3 +11,7 @@ services:
     volumes:
       - db_data:/var/opt/mssql
     restart: unless-stopped
+  genome:
+    image: ghcr.io/silvernetgroupsggw/genome:latest
+    ports:
+      - 8000:8000
