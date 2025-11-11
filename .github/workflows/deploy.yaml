@@ -37,7 +37,7 @@ jobs:
                       if [ ! -d ~/Infra ]; then
                           git clone https://github.com/SilverNETGroupSGGW/Infra
                       fi
-  
+
                       cd ~/Infra
 
                       # Pull latest changes
@@ -47,6 +47,6 @@ jobs:
                       echo "${{ github.event.client_payload.GITHUB_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
                       # Pull and deploy services
-                      docker-compose pull ${{ github.event.client_payload.image || '' }}
-                      docker-compose up -d
+                      docker compose pull ${{ github.event.client_payload.image || '' }}
+                      docker compose up -d
                       docker image prune -f
