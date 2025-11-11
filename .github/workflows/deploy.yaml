@@ -4,15 +4,8 @@ on:
     push:
         branches:
             - main
-    workflow_call:
-        inputs:
-            image:
-                description: "Optional Docker image to deploy (format: ghcr.io/owner/repo[:tag])"
-                required: false
-                type: string
-        secrets:
-            REPO_GITHUB_TOKEN:
-                required: true
+    repository_dispatch:
+        types: [deploy]
 
 concurrency:
     group: deploy-docker-compose
@@ -53,11 +46,14 @@ jobs:
                       git pull
 
                       # Login to GitHub Container Registry
-                      echo "${{ secrets.REPO_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+                      echo "${{ github.event.client_payload.GITHUB_TOKEN || secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
                       # Pull and deploy services
-                      if [ -n "${{ inputs.image }}" ]; then
-                              docker pull "${{ inputs.image }}"
+                      IMAGE="${{ github.event.client_payload.image }}"
+                      if [ -n "$IMAGE" ]; then
+                          docker pull "$IMAGE"
+                      else
+                          docker compose pull
                       fi
                       docker compose up -d
                       docker image prune -f
