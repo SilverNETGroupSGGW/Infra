@@ -36,7 +36,8 @@ jobs:
 
                       if [ ! -d ~/Infra ]; then
                           git clone https://github.com/SilverNETGroupSGGW/Infra
-
+                      fi
+  
                       cd ~/Infra
 
                       # Pull latest changes
