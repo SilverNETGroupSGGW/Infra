@@ -319,7 +319,10 @@ project), the service
 account's release access to the app in Play Console, the app repository's
 release environment (required reviewers, release tags allowed) and the
 repository variables the workflow reads. Secrets stay out of Terraform; set
-them with `gh secret set`.
+them with `gh secret set`. [`terraform/apps/firebase.tf`](terraform/apps/firebase.tf)
+also tracks the apps' Firebase projects, apps, Firestore databases, buckets
+and Hosting sites; their deployments (rules, Hosting releases, Functions) stay
+with the apps' `firebase deploy`.
 
 To add an app, add its project to `apps` of `terraform/bootstrap` and
 apply that (it gives the Terraform service account its roles there), then add

@@ -24,6 +24,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 8.5"
     }
+    google-beta = {
+      source  = "hashicorp/google-beta"
+      version = "~> 8.5"
+    }
     googleplay = {
       source  = "oliver-binns/googleplay"
       version = "~> 0.6.3"
@@ -66,6 +70,9 @@ provider "github" {
 }
 
 provider "google" {}
+
+# Firebase resources (firebase.tf).
+provider "google-beta" {}
 
 provider "googleplay" {
   developer_id = "8827645756827128332" # KN Silver .NET
