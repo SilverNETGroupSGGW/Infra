@@ -6,3 +6,7 @@ mise.local.lock
 __pycache__/
 .DS_Store
 .idea/
+
+# Terraform working files; the module's callers keep their own lock files
+.terraform/
+terraform/**/.terraform.lock.hcl

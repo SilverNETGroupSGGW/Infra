@@ -307,68 +307,91 @@ Also:
 
 ## Store setup
 
+### Release setup with Terraform
+
+The [`terraform/app-release`](terraform/app-release) module sets up one app:
+a Google Cloud project for its Google Play releases, the service account's
+access to the app in Play Console, the app repository's release environment
+(required reviewers, release tags allowed) and the repository variables the
+workflow reads. Secrets stay out of Terraform and its state. Call it from a
+root module next to the app, for example in `infra/release/main.tf` of the app
+repository:
+
+```hcl
+terraform {
+  required_providers {
+    github     = { source = "integrations/github", version = "~> 6.13" }
+    google     = { source = "hashicorp/google", version = "~> 8.5" }
+    googleplay = { source = "oliver-binns/googleplay", version = "~> 0.6.3" }
+  }
+}
+
+provider "github" {
+  owner = "SilverNETGroupSGGW"
+}
+
+provider "google" {}
+
+provider "googleplay" {
+  developer_id = "1234567890123456789" # in the Play Console URL
+}
+
+module "release" {
+  source = "github.com/SilverNETGroupSGGW/flutter-workflows//terraform/app-release?ref=<commit-sha>"
+
+  repository          = "my-app"
+  android_package     = "com.example.myapp"
+  google_project_id   = "my-app-releases"
+  google_project_name = "My App releases"
+  reviewer_user_ids   = [12345678] # gh api users/NAME --jq .id
+
+  apple_team_id                        = "ABCDE12345"
+  app_store_connect_issuer_id          = "00000000-0000-0000-0000-000000000000"
+  app_store_connect_key_id             = "ABC123DEFG"
+  app_store_uses_non_exempt_encryption = false
+}
+```
+
+Apply it with your own accounts; no key is created for Terraform. You need to
+be able to create Google Cloud projects, administer the repository and manage
+users in Play Console:
+
+```sh
+gcloud auth application-default login --scopes=openid,\
+https://www.googleapis.com/auth/userinfo.email,\
+https://www.googleapis.com/auth/cloud-platform,\
+https://www.googleapis.com/auth/androidpublisher
+export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json
+export GITHUB_TOKEN=$(gh auth token)
+terraform init
+# Play Console API calls count against the new project, so create it first.
+terraform apply -target=module.release.google_project_service.release
+gcloud auth application-default set-quota-project my-app-releases
+terraform apply
+```
+
+Then pass `environment: release` to `flutter-release.yml`: the Google
+provider only accepts tokens of this workflow's jobs in that environment of
+that repository. GitHub Free has no environments in private repositories; set
+`environment = null` until the repository is public, and leave `environment`
+out of the workflow. Keep the state file private; it holds no secrets.
+
 ### Google Play
 
 The App Bundle is signed with the app's upload key (the `ANDROID_*` secrets).
 No Google key is stored: the workflow signs in with Workload Identity
-Federation. One pool and provider can serve all apps; each app's repository
-gets its own service account binding.
+Federation, set up by the Terraform module above together with the service
+account's Play Console access ("Release to testing tracks" and "Release to
+production, exclude devices, and use Play App Signing" for this app only).
+Store the upload key as secrets of the release environment (without
+`--env release` while the app has no environment):
 
-1. Once per organization, in a Google Cloud project: enable the APIs and create
-   a provider that only accepts tokens of this release workflow from the
-   organization (`ORG_ID` is the organization's numeric GitHub ID:
-   `gh api orgs/SilverNETGroupSGGW --jq .id`):
-
-   ```sh
-   PROJECT_ID=your-project-id
-   ORG_ID=your-github-org-id
-   gcloud services enable iam.googleapis.com iamcredentials.googleapis.com \
-     sts.googleapis.com cloudresourcemanager.googleapis.com \
-     androidpublisher.googleapis.com --project="$PROJECT_ID"
-   gcloud iam workload-identity-pools create github \
-     --project="$PROJECT_ID" --location=global
-   gcloud iam workload-identity-pools providers create-oidc flutter-release \
-     --project="$PROJECT_ID" --location=global --workload-identity-pool=github \
-     --issuer-uri=https://token.actions.githubusercontent.com \
-     --attribute-mapping="google.subject=assertion.sub,\
-   attribute.repository_id=assertion.repository_id" \
-     --attribute-condition="assertion.repository_owner_id == '$ORG_ID' \
-   && assertion.job_workflow_ref.startsWith(\
-   'SilverNETGroupSGGW/flutter-workflows/.github/workflows/flutter-release.yml@')"
-   gcloud iam workload-identity-pools providers describe flutter-release \
-     --project="$PROJECT_ID" --location=global --workload-identity-pool=github \
-     --format='value(name)'
-   ```
-
-   The last command prints the provider name for
-   `GOOGLE_WORKLOAD_IDENTITY_PROVIDER`. To accept an app's tokens only from
-   its `environment`, add
-   `&& (assertion.repository_id != 'REPO_ID' || assertion.environment == 'NAME')`
-   to the condition; the other apps are not affected.
-2. For each app, create a service account and let only the app's repository
-   act as it (`REPO_ID`: `gh api repos/OWNER/REPO --jq .id`; numeric IDs
-   survive renames):
-
-   ```sh
-   PROJECT_ID=your-project-id
-   REPO_ID=your-repository-id
-   PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" \
-     --format='value(projectNumber)')
-   gcloud iam service-accounts create my-app-publisher --project="$PROJECT_ID"
-   gcloud iam service-accounts add-iam-policy-binding \
-     "my-app-publisher@$PROJECT_ID.iam.gserviceaccount.com" \
-     --project="$PROJECT_ID" --role=roles/iam.workloadIdentityUser \
-     --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/\
-   locations/global/workloadIdentityPools/github/attribute.repository_id/\
-   $REPO_ID"
-   ```
-
-3. In Play Console, Users and permissions → Invite new users: invite the
-   service account's e-mail with these app permissions: "Release apps to
-   testing tracks" and "Release to production, exclude devices, and use Play
-   App Signing".
-4. Set the app's variables `GOOGLE_WORKLOAD_IDENTITY_PROVIDER` and
-   `GOOGLE_PLAY_SERVICE_ACCOUNT` (the service account's e-mail).
+```sh
+base64 -w0 key.jks | gh secret set ANDROID_KEYSTORE_BASE64 --env release
+gh secret set ANDROID_KEY_ALIAS --env release
+gh secret set ANDROID_KEY_PASSWORD --env release
+gh secret set ANDROID_STORE_PASSWORD --env release
+```
 
 Betas go to the beta (open testing) track and releases to production, all at
 once. Open testing needs its countries or regions chosen once in Play Console
@@ -385,16 +408,22 @@ count ten times against the Actions minutes of a private repository.
 1. In App Store Connect, Users and Access → Integrations → App Store Connect
    API, create a team key with the Admin role (cloud signing needs it; the
    Account Holder enables API access once). Download the `.p8` file; it can
-   only be downloaded once. One key serves all apps of the team.
-2. Store the `.p8` contents as the secret `APP_STORE_CONNECT_KEY` and set the
-   variables `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` and
-   `APPLE_TEAM_ID` (Membership details on developer.apple.com). Organization
-   secrets and variables limited to the app repositories avoid copying them.
+   only be downloaded once. Every team key reaches all apps of the team; a key
+   per app can still be revoked on its own. This step stays manual: the App
+   Store Connect API cannot create API keys.
+2. Store the `.p8` contents as a secret of the release environment
+   (`gh secret set APP_STORE_CONNECT_KEY --env release < AuthKey_KEYID.p8`;
+   the repository without an environment),
+   and pass its key ID, the issuer ID and the team ID (Membership details on
+   developer.apple.com) to the Terraform module, which sets the variables
+   `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` and
+   `APPLE_TEAM_ID`.
 3. Answer export compliance once per app: add `ITSAppUsesNonExemptEncryption`
-   to `ios/Runner/Info.plist`, or set the variable
-   `APP_STORE_USES_NON_EXEMPT_ENCRYPTION` to `false` or `true`. This is a
-   legal declaration for the app's owner to make. Without it the iOS jobs stop
-   before building: TestFlight and App Review both need the answer.
+   to `ios/Runner/Info.plist`, or set `app_store_uses_non_exempt_encryption`
+   of the Terraform module (the variable `APP_STORE_USES_NON_EXEMPT_ENCRYPTION`)
+   to `false` or `true`. This is a legal declaration for the app's owner to
+   make. Without it the iOS jobs stop before building: TestFlight and App
+   Review both need the answer.
 4. Answer the age rating questions in App Information; App Store Connect asks
    new ones before it accepts updates.
 
