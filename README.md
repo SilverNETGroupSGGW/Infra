@@ -5,9 +5,7 @@ Infrastructure of SilverNETGroupSGGW:
 - reusable GitHub Actions workflows for the Flutter apps: continuous
   integration, releases to GitHub, Google Play, App Store Connect and GitHub
   Pages (this README);
-- the Terraform setup of the apps' store releases ([Store setup](#store-setup));
-- the Docker Compose services on the club's server
-  ([docs/deploy.md](docs/deploy.md)).
+- the Terraform setup of the apps' store releases ([Store setup](#store-setup)).
 
 | Workflow | What it does |
 | --- | --- |
