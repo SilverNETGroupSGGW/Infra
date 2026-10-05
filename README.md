@@ -379,9 +379,6 @@ An administrator sets this up once:
    gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
      < private-key.pem
    gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra
-   # Encrypts the saved plan between the plan and apply jobs.
-   openssl rand -base64 32 | gh secret set TF_PLAN_PASSPHRASE \
-     --repo SilverNETGroupSGGW/Infra
    ```
 
    If the Play Console call fails because the API is not enabled, run
