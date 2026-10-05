@@ -89,8 +89,8 @@ module "plan_wzim" {
 
   apple_team_id               = local.apple.team_id
   app_store_connect_issuer_id = local.apple.issuer_id
-  # Set once the Plan WZIM team key (Admin role) exists.
-  app_store_connect_key_id = null
+  # The "Plan WZIM releases" team key (Admin role).
+  app_store_connect_key_id = "36AU2J89DD"
   # The answer of the last iOS build, 4.1.4.
   app_store_uses_non_exempt_encryption = false
 }
@@ -141,6 +141,11 @@ import {
 import {
   to = module.plan_wzim.github_actions_variable.release["APP_STORE_USES_NON_EXEMPT_ENCRYPTION"]
   id = "SilverTimetable2:APP_STORE_USES_NON_EXEMPT_ENCRYPTION"
+}
+
+import {
+  to = module.plan_wzim.github_actions_variable.release["APP_STORE_CONNECT_KEY_ID"]
+  id = "SilverTimetable2:APP_STORE_CONNECT_KEY_ID"
 }
 
 import {
