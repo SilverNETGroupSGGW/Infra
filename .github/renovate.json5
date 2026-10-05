@@ -1,4 +1,25 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  // Covers the GitHub Actions (pinned by SHA), mise.toml tools and Terraform
+  // providers.
   extends: ['config:recommended'],
+  // Refreshes the providers' hashes in the .terraform.lock.hcl files.
+  lockFileMaintenance: {
+    enabled: true,
+  },
+  packageRules: [
+    {
+      // Merged once CI (lint, Terraform validate, tests) passes; majors wait
+      // for a review. A merged Terraform change is still only planned until
+      // its apply is approved.
+      matchUpdateTypes: ['minor', 'patch', 'pin', 'digest', 'lockFileMaintenance'],
+      automerge: true,
+    },
+    {
+      // A single maintainer's provider with access to Play Console: every
+      // update waits for a review.
+      matchPackageNames: ['oliver-binns/googleplay'],
+      automerge: false,
+    },
+  ],
 }
