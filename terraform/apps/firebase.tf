@@ -5,8 +5,11 @@
 # and Hosting sites can never be destroyed by Terraform.
 #
 # Not imported: Realtime Database (none), Analytics and Cloud Messaging (no
-# Terraform resources), Dni SGGW's Storage bucket (locked on the Spark plan)
-# and its sendNotificationBroadcast function (deployed from sggw_days).
+# Terraform resources), Plan WZIM's Firebase link of its default bucket (a
+# legacy App Engine bucket; reading the link needs the Cloud Storage for
+# Firebase API, which the project does not use), Dni SGGW's Storage bucket
+# (locked on the Spark plan) and its sendNotificationBroadcast function
+# (deployed from sggw_days).
 
 locals {
   plan_wzim_project = "silvertimetable-bea41"
@@ -130,21 +133,6 @@ resource "google_storage_bucket" "plan_wzim" {
   lifecycle {
     prevent_destroy = true
     ignore_changes  = all
-  }
-}
-
-import {
-  to = google_firebase_storage_bucket.plan_wzim
-  id = "projects/silvertimetable-bea41/buckets/silvertimetable-bea41.appspot.com"
-}
-
-resource "google_firebase_storage_bucket" "plan_wzim" {
-  provider  = google-beta
-  project   = local.plan_wzim_project
-  bucket_id = google_storage_bucket.plan_wzim["silvertimetable-bea41.appspot.com"].name
-
-  lifecycle {
-    prevent_destroy = true
   }
 }
 
