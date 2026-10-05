@@ -1,0 +1,8 @@
+# Local tool overrides
+mise.local.toml
+.mise.local.toml
+mise.local.lock
+
+__pycache__/
+.DS_Store
+.idea/

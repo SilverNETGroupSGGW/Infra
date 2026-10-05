@@ -1,0 +1,44 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+# Tools and tasks for checking this repository.
+min_version = { hard = "2026.9.16", soft = "2026.10.0" }
+
+[settings]
+lockfile = true
+lockfile_platforms = ["linux-x64", "linux-arm64", "macos-arm64", "macos-x64"]
+
+[tools]
+actionlint = "1.7.12"
+gitleaks = "8.30.1"
+rumdl = "0.2.78"
+# Used by actionlint to check `run:` scripts.
+shellcheck = "0.11.0"
+taplo = "0.10.0"
+zizmor = "1.30.1"
+
+[tasks."lint:actions"]
+description = "Lint the GitHub Actions workflows"
+run = ["actionlint", "zizmor .github/workflows"]
+
+[tasks."lint:toml"]
+description = "Check TOML formatting and validate mise.toml against its schema"
+run = ["taplo fmt --check mise.toml", "taplo lint mise.toml"]
+
+[tasks."lint:markdown"]
+description = "Lint the Markdown documentation"
+run = "git ls-files -z '*.md' | xargs -0 rumdl check"
+
+[tasks."lint:secrets"]
+description = "Scan the whole git history for committed secrets"
+run = "gitleaks git --no-banner --redact ."
+
+[tasks.lint]
+description = "Run all linters"
+depends = ["lint:actions", "lint:toml", "lint:markdown", "lint:secrets"]
+
+[tasks.test]
+description = "Test the store scripts against local mocks of the store APIs"
+run = "python3 -m unittest discover -s tests -t . -v"
+
+[tasks.check]
+description = "Run all linters and tests"
+depends = ["lint", "test"]
