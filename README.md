@@ -314,79 +314,73 @@ Also:
 
 ### Release setup with Terraform
 
-The [`terraform/app-release`](terraform/app-release) module sets up one app:
-a Google Cloud project for its Google Play releases, the service account's
-access to the app in Play Console, the app repository's release environment
-(required reviewers, release tags allowed) and the repository variables the
-workflow reads. Secrets stay out of Terraform and its state. Call it from a
-root module next to the app, for example in `infra/release/main.tf` of the app
-repository:
+[`terraform/apps`](terraform/apps/main.tf) describes the store release setup
+of every app with the [`terraform/app-release`](terraform/app-release) module:
+a Google Cloud project in the organization's `releases` folder with keyless
+Google Play sign-in, the service account's release access to the app in Play
+Console, the app repository's release environment (required reviewers,
+release tags allowed) and the repository variables the workflow reads. Secrets
+stay out of Terraform; set them with `gh secret set`.
 
-```hcl
-terraform {
-  required_providers {
-    github     = { source = "integrations/github", version = "~> 6.13" }
-    google     = { source = "hashicorp/google", version = "~> 8.5" }
-    googleplay = { source = "oliver-binns/googleplay", version = "~> 0.6.3" }
-  }
-}
+To add an app, add a module block to `terraform/apps/main.tf` and merge it to
+`main`. The [Terraform workflow](.github/workflows/terraform.yml) plans the
+change and, once a reviewer of the `terraform` environment has approved the
+plan job and then the apply job, applies it. Settings that already exist get
+an `import` block, as the ones set by hand before.
 
-provider "github" {
-  owner = "SilverNETGroupSGGW"
-}
+Pass `environment: release` to `flutter-release.yml` when the app has the
+release environment: its Google provider then only accepts tokens of this
+workflow's jobs in that environment. GitHub Free has no environments in
+private repositories; set `environment = null` until the repository is public
+and leave `environment` out of the workflow.
 
-provider "google" {}
+#### Terraform in CI
 
-provider "googleplay" {
-  developer_id = "1234567890123456789" # in the Play Console URL
-}
+The workflow signs in to Google Cloud as the Terraform service account
+(Workload Identity Federation, only from `main` in the `terraform`
+environment) and to GitHub as the organization's Terraform GitHub App, and
+keeps the state in a Cloud Storage bucket. An administrator sets this up once:
 
-module "release" {
-  source = "github.com/SilverNETGroupSGGW/Infra//terraform/app-release?ref=<commit-sha>"
+1. Create the Google Cloud organization: sign up for Cloud Identity Free with
+   the `silver.sggw.pl` domain and verify it with the DNS TXT record it shows.
+   Link a billing account to it (the state bucket needs one; it stays in the
+   always-free tier).
+2. Create the GitHub App in the organization's settings (Developer settings →
+   GitHub Apps): no webhook, repository permissions Administration,
+   Environments, Secrets and Variables (read and write) and Metadata (read).
+   Install it on the app repositories and generate a private key.
+3. Apply [`terraform/bootstrap`](terraform/bootstrap/main.tf) with your own
+   accounts. It creates the `silvernet-infra` project with the state bucket,
+   the Terraform service account and its sign-in, its rights on the
+   `releases` folder and the Play Console admin permission, and the
+   `terraform` environment with its variables:
 
-  repository          = "my-app"
-  android_package     = "com.example.myapp"
-  google_project_id   = "my-app-releases"
-  google_project_name = "My App releases"
-  reviewer_user_ids   = [12345678] # gh api users/NAME --jq .id
+   ```sh
+   gcloud auth application-default login --scopes=openid,\
+   https://www.googleapis.com/auth/userinfo.email,\
+   https://www.googleapis.com/auth/cloud-platform,\
+   https://www.googleapis.com/auth/androidpublisher
+   export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json
+   export GITHUB_TOKEN=$(gh auth token)
+   cd terraform/bootstrap
+   terraform init
+   terraform apply -var org_id=ORG_ID -var billing_account=BILLING_ACCOUNT \
+     -var github_app_id=APP_ID -var github_app_installation_id=INSTALLATION_ID
+   gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
+     --env terraform < private-key.pem
+   ```
 
-  apple_team_id                        = "ABCDE12345"
-  app_store_connect_issuer_id          = "00000000-0000-0000-0000-000000000000"
-  app_store_connect_key_id             = "ABC123DEFG"
-  app_store_uses_non_exempt_encryption = false
-}
-```
-
-Apply it with your own accounts; no key is created for Terraform. You need to
-be able to create Google Cloud projects, administer the repository and manage
-users in Play Console:
-
-```sh
-gcloud auth application-default login --scopes=openid,\
-https://www.googleapis.com/auth/userinfo.email,\
-https://www.googleapis.com/auth/cloud-platform,\
-https://www.googleapis.com/auth/androidpublisher
-export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json
-export GITHUB_TOKEN=$(gh auth token)
-terraform init
-# Play Console API calls count against the new project, so create it first.
-terraform apply -target=module.release.google_project_service.release
-gcloud auth application-default set-quota-project my-app-releases
-terraform apply
-```
-
-Then pass `environment: release` to `flutter-release.yml`: the Google
-provider only accepts tokens of this workflow's jobs in that environment of
-that repository. GitHub Free has no environments in private repositories; set
-`environment = null` until the repository is public, and leave `environment`
-out of the workflow. Keep the state file private; it holds no secrets.
+   If the Play Console call fails because the API is not enabled, run
+   `gcloud auth application-default set-quota-project silvernet-infra` and
+   apply again. Keep the bootstrap state (`terraform.tfstate`) private.
+4. Run the Terraform workflow (Actions → Terraform → Run workflow).
 
 ### Google Play
 
 The App Bundle is signed with the app's upload key (the `ANDROID_*` secrets).
 No Google key is stored: the workflow signs in with Workload Identity
-Federation, set up by the Terraform module above together with the service
-account's Play Console access ("Release to testing tracks" and "Release to
+Federation, set up by `terraform/apps` together with the service account's
+Play Console access ("Release to testing tracks" and "Release to
 production, exclude devices, and use Play App Signing" for this app only).
 Store the upload key as secrets of the release environment (without
 `--env release` while the app has no environment):
@@ -418,14 +412,14 @@ count ten times against the Actions minutes of a private repository.
    Store Connect API cannot create API keys.
 2. Store the `.p8` contents as a secret of the release environment
    (`gh secret set APP_STORE_CONNECT_KEY --env release < AuthKey_KEYID.p8`;
-   the repository without an environment),
-   and pass its key ID, the issuer ID and the team ID (Membership details on
-   developer.apple.com) to the Terraform module, which sets the variables
+   the repository without an environment), and pass its key ID, the issuer ID
+   and the team ID (Membership details on developer.apple.com) to the app's
+   block in `terraform/apps`, which sets the variables
    `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID` and
    `APPLE_TEAM_ID`.
 3. Answer export compliance once per app: add `ITSAppUsesNonExemptEncryption`
    to `ios/Runner/Info.plist`, or set `app_store_uses_non_exempt_encryption`
-   of the Terraform module (the variable `APP_STORE_USES_NON_EXEMPT_ENCRYPTION`)
+   of the app's block (the variable `APP_STORE_USES_NON_EXEMPT_ENCRYPTION`)
    to `false` or `true`. This is a legal declaration for the app's owner to
    make. Without it the iOS jobs stop before building: TestFlight and App
    Review both need the answer.

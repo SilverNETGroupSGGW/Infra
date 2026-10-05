@@ -29,11 +29,10 @@ description = "Lint the Markdown documentation"
 run = "git ls-files -z '*.md' | xargs -0 rumdl check"
 
 [tasks."lint:terraform"]
-description = "Check the formatting of the Terraform module and validate it"
+description = "Check the formatting of the Terraform configuration and validate it"
 run = [
   "terraform fmt -check -recursive terraform",
-  "terraform -chdir=terraform/app-release init -backend=false -input=false -no-color",
-  "terraform -chdir=terraform/app-release validate -no-color",
+  "for dir in app-release apps bootstrap; do terraform -chdir=terraform/$dir init -backend=false -input=false -no-color > /dev/null && terraform -chdir=terraform/$dir validate -no-color || exit 1; done",
 ]
 
 [tasks."lint:secrets"]
