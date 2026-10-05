@@ -314,16 +314,19 @@ Also:
 
 [`terraform/apps`](terraform/apps/main.tf) describes the store release setup
 of every app with the [`terraform/app-release`](terraform/app-release) module:
-a Google Cloud project in the organization's `releases` folder with keyless
-Google Play sign-in, the service account's release access to the app in Play
-Console, the app repository's release environment (required reviewers,
-release tags allowed) and the repository variables the workflow reads. Secrets
-stay out of Terraform; set them with `gh secret set`.
+keyless Google Play sign-in in the app's own Google Cloud project, the service
+account's release access to the app in Play Console, the app repository's
+release environment (required reviewers, release tags allowed) and the
+repository variables the workflow reads. Secrets stay out of Terraform; set
+them with `gh secret set`.
 
-To add an app, add a module block to `terraform/apps/main.tf` and merge it to
-`main`. The [Terraform workflow](.github/workflows/terraform.yml) plans the
-change and, once a reviewer of the `terraform` environment has approved the
-plan job and then the apply job, applies it. Settings that already exist get
+To add an app, add its project to `app_projects` of `terraform/bootstrap` and
+apply that (service accounts can only create projects in a Google Cloud
+organization, which the club does not have yet), then add a module block to
+`terraform/apps/main.tf` and merge it to `main`. The
+[Terraform workflow](.github/workflows/terraform.yml) plans the change and,
+once a reviewer of the `terraform` environment has approved the plan job and
+then the apply job, applies it. Settings that already exist get
 an `import` block, as the ones set by hand before.
 
 Pass `environment: release` to `flutter-release.yml` when the app has the
@@ -339,18 +342,19 @@ The workflow signs in to Google Cloud as the Terraform service account
 environment) and to GitHub as the organization's Terraform GitHub App, and
 keeps the state in a Cloud Storage bucket. An administrator sets this up once:
 
-1. Create the Google Cloud organization: sign up for Cloud Identity Free with
-   the `silver.sggw.pl` domain and verify it with the DNS TXT record it shows.
-   Link a billing account to it (the state bucket needs one; it stays in the
-   always-free tier).
+1. Have a Google Cloud billing account for the infra project (the state
+   bucket needs one; it stays in the always-free tier). A Google Cloud
+   organization (Cloud Identity Free on `silver.sggw.pl`) is optional for now;
+   the commented-out parts of `terraform/bootstrap` and `terraform/apps` show
+   what changes with it.
 2. Create the GitHub App in the organization's settings (Developer settings →
    GitHub Apps): no webhook, repository permissions Administration,
    Environments, Secrets and Variables (read and write) and Metadata (read).
    Install it on the app repositories and generate a private key.
 3. Apply [`terraform/bootstrap`](terraform/bootstrap/main.tf) with your own
    accounts. It creates the `silvernet-infra` project with the state bucket,
-   the Terraform service account and its sign-in, its rights on the
-   `releases` folder and the Play Console admin permission, and the
+   the apps' projects, the Terraform service account and its sign-in, its
+   rights on those projects and the Play Console admin permission, and the
    `terraform` environment with its variables:
 
    ```sh
@@ -362,7 +366,7 @@ keeps the state in a Cloud Storage bucket. An administrator sets this up once:
    export GITHUB_TOKEN=$(gh auth token)
    cd terraform/bootstrap
    terraform init
-   terraform apply -var org_id=ORG_ID -var billing_account=BILLING_ACCOUNT \
+   terraform apply -var billing_account=BILLING_ACCOUNT \
      -var github_app_id=APP_ID -var github_app_installation_id=INSTALLATION_ID
    gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
      --env terraform < private-key.pem

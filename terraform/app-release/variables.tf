@@ -9,13 +9,20 @@ variable "android_package" {
 }
 
 variable "google_project_id" {
-  description = "ID of the Google Cloud project created for the app's Google Play releases."
+  description = "ID of the Google Cloud project for the app's Google Play releases."
   type        = string
 }
 
 variable "google_project_name" {
-  description = "Display name of that project."
+  description = "Display name of that project, when the module creates it."
   type        = string
+  default     = null
+}
+
+variable "create_google_project" {
+  description = "Create the project; false uses an existing one (service accounts can only create projects in a Google Cloud organization)."
+  type        = bool
+  default     = true
 }
 
 variable "google_org_id" {

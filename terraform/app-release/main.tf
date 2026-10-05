@@ -12,9 +12,12 @@ locals {
   # Numeric IDs survive renames of the repository and its owner.
   repository_id    = tostring(data.github_repository.app.repo_id)
   release_workflow = "SilverNETGroupSGGW/Infra/.github/workflows/flutter-release.yml@"
+  project_id       = var.create_google_project ? google_project.release[0].project_id : var.google_project_id
 }
 
 resource "google_project" "release" {
+  count = var.create_google_project ? 1 : 0
+
   project_id = var.google_project_id
   name       = var.google_project_name
   org_id     = var.google_org_id
@@ -30,12 +33,12 @@ resource "google_project_service" "release" {
     "sts.googleapis.com",
   ])
 
-  project = google_project.release.project_id
+  project = local.project_id
   service = each.value
 }
 
 resource "google_iam_workload_identity_pool" "github" {
-  project                   = google_project.release.project_id
+  project                   = local.project_id
   workload_identity_pool_id = "github"
   display_name              = "GitHub Actions"
 
@@ -43,7 +46,7 @@ resource "google_iam_workload_identity_pool" "github" {
 }
 
 resource "google_iam_workload_identity_pool_provider" "flutter_release" {
-  project                            = google_project.release.project_id
+  project                            = local.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
   workload_identity_pool_provider_id = "flutter-release"
   display_name                       = "flutter-release.yml"
@@ -66,7 +69,7 @@ resource "google_iam_workload_identity_pool_provider" "flutter_release" {
 }
 
 resource "google_service_account" "play_publisher" {
-  project      = google_project.release.project_id
+  project      = local.project_id
   account_id   = "play-publisher"
   display_name = "Google Play releases of ${var.repository}"
 

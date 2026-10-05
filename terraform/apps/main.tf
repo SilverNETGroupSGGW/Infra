@@ -1,6 +1,7 @@
 # Store release setup of the organization's apps (terraform/app-release),
 # applied by the Terraform workflow after a reviewer approves it. A new app is
-# a new module block here. Secrets are set with `gh secret set`.
+# a new module block here and, until there is a Google Cloud organization, its
+# project in terraform/bootstrap. Secrets are set with `gh secret set`.
 
 terraform {
   required_version = ">= 1.11"
@@ -26,10 +27,15 @@ terraform {
   }
 }
 
-variable "releases_folder_id" {
-  description = "Google Cloud folder of the apps' projects (TF_RELEASES_FOLDER_ID of the terraform environment)."
-  type        = string
-}
+# The apps' projects come from terraform/bootstrap while there is no Google
+# Cloud organization (silver.sggw.pl, later). With one, uncomment this and the
+# google_folder_id lines, drop create_google_project, and the modules create
+# the projects in the releases folder.
+#
+# variable "releases_folder_id" {
+#   description = "Google Cloud folder of the apps' projects (TF_RELEASES_FOLDER_ID of the terraform environment)."
+#   type        = string
+# }
 
 # The organization's Terraform GitHub App. The workflow writes its private key
 # to a file, so that the key never ends up in a saved plan.
@@ -71,11 +77,11 @@ locals {
 module "plan_wzim" {
   source = "../app-release"
 
-  repository          = "SilverTimetable2"
-  android_package     = "com.silvernet.silvertimetable"
-  google_project_id   = "plan-wzim-releases"
-  google_project_name = "Plan WZIM releases"
-  google_folder_id    = var.releases_folder_id
+  repository            = "SilverTimetable2"
+  android_package       = "com.silvernet.silvertimetable"
+  google_project_id     = "plan-wzim-releases"
+  create_google_project = false # from terraform/bootstrap
+  # google_folder_id    = var.releases_folder_id
   # GitHub Free has no environments in private repositories; "release" once
   # the repository is public.
   environment       = null
@@ -94,12 +100,12 @@ module "plan_wzim" {
 module "dni_sggw" {
   source = "../app-release"
 
-  repository          = "sggw_days"
-  android_package     = "com.silvernet.sggw_days"
-  google_project_id   = "dni-sggw-releases"
-  google_project_name = "Dni SGGW releases"
-  google_folder_id    = var.releases_folder_id
-  environment         = null
+  repository            = "sggw_days"
+  android_package       = "com.silvernet.sggw_days"
+  google_project_id     = "dni-sggw-releases"
+  create_google_project = false # from terraform/bootstrap
+  # google_folder_id    = var.releases_folder_id
+  environment = null
 
   apple_team_id               = local.apple.team_id
   app_store_connect_issuer_id = local.apple.issuer_id
@@ -110,12 +116,12 @@ module "dni_sggw" {
 module "kampus_sggw" {
   source = "../app-release"
 
-  repository          = "kampus_sggw"
-  android_package     = "com.silvers.kampus_sggw_remake"
-  google_project_id   = "kampus-sggw-releases"
-  google_project_name = "Kampus SGGW releases"
-  google_folder_id    = var.releases_folder_id
-  environment         = null
+  repository            = "kampus_sggw"
+  android_package       = "com.silvers.kampus_sggw_remake"
+  google_project_id     = "kampus-sggw-releases"
+  create_google_project = false # from terraform/bootstrap
+  # google_folder_id    = var.releases_folder_id
+  environment = null
 
   apple_team_id               = local.apple.team_id
   app_store_connect_issuer_id = local.apple.issuer_id
