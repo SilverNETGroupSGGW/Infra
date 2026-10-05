@@ -117,19 +117,23 @@ module "dni_sggw" {
   app_store_connect_key_id = "8P887NK246"
 }
 
-module "kampus_sggw" {
-  source = "../app-release"
-
-  repository            = "kampus_sggw"
-  android_package       = "com.silvers.kampus_sggw_remake"
-  google_project_id     = "kampus-sggw-2021"
-  create_google_project = false # the app's Firebase project
-  # google_folder_id    = var.apps_folder_id
-  environment = null
-
-  apple_team_id               = local.apple.team_id
-  app_store_connect_issuer_id = local.apple.issuer_id
-}
+# Kampus SGGW waits until the club has access to its Firebase project
+# (kampus-sggw-2021); uncomment it together with its entry in
+# terraform/bootstrap.
+#
+# module "kampus_sggw" {
+#   source = "../app-release"
+#
+#   repository            = "kampus_sggw"
+#   android_package       = "com.silvers.kampus_sggw_remake"
+#   google_project_id     = "kampus-sggw-2021"
+#   create_google_project = false # the app's Firebase project
+#   # google_folder_id    = var.apps_folder_id
+#   environment = null
+#
+#   apple_team_id               = local.apple.team_id
+#   app_store_connect_issuer_id = local.apple.issuer_id
+# }
 
 # Variables that were set by hand before Terraform managed them.
 import {

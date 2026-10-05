@@ -40,7 +40,8 @@ variable "app_projects" {
   default = {
     "silvertimetable-bea41" = "Plan WZIM"
     "sggw-days"             = "Dni SGGW"
-    "kampus-sggw-2021"      = "Kampus SGGW"
+    # Kampus SGGW, once its owner gives the club access to the project:
+    # "kampus-sggw-2021" = "Kampus SGGW"
   }
 }
 
