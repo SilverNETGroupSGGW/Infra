@@ -346,9 +346,9 @@ as the organization's Terraform GitHub App, and keeps the state in HCP
 Terraform's free tier. Its plan job runs without an approval; the apply job
 waits for a reviewer of the `terraform` environment. The repository is public,
 so the run summary lists only the changing resources, the logs show no plan
-or apply values, and the saved plan is encrypted between the two jobs. No Google Cloud billing account
-is linked to anything, so nothing can be billed. An administrator sets this up
-once:
+or apply values, and the saved plan is encrypted between the two jobs. No
+Google Cloud billing account is linked to anything, so nothing can be billed.
+An administrator sets this up once:
 
 1. Have the club's HCP Terraform organization `KN-Silver` (free plan; the
    bootstrap imports it) and a team API token for the workflow, stored as the
