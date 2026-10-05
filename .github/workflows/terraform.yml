@@ -88,9 +88,13 @@ jobs:
         name: Encrypt the plan
         working-directory: terraform/apps
         env:
-          PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+          PLAN_KEY: ${{ secrets.TF_PLAN_PASSPHRASE }}
         run: |
-          printf '%s' "${PASSPHRASE:?Set the TF_PLAN_PASSPHRASE repository secret}" |
+          if [ -z "$PLAN_KEY" ]; then
+            echo "::error::Missing repository secret: TF_PLAN_PASSPHRASE"
+            exit 1
+          fi
+          printf '%s' "$PLAN_KEY" |
             gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
               --symmetric --cipher-algo AES256 --output tfplan.gpg tfplan
           rm tfplan
@@ -144,9 +148,9 @@ jobs:
       - name: Decrypt the plan
         working-directory: terraform/apps
         env:
-          PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+          PLAN_KEY: ${{ secrets.TF_PLAN_PASSPHRASE }}
         run: |
-          printf '%s' "$PASSPHRASE" |
+          printf '%s' "$PLAN_KEY" |
             gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
               --decrypt --output tfplan tfplan.gpg
       - name: Apply
