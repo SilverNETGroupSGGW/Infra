@@ -24,7 +24,6 @@ on:
       android-package:
         description: Android application ID; turns on Google Play.
         type: string
-        default: ""
       android-keystore-path:
         description: Where the build expects the upload keystore, relative to app-dir.
         type: string
@@ -32,11 +31,9 @@ on:
       bundle-id:
         description: iOS bundle ID; turns on the iOS build and App Store Connect.
         type: string
-        default: ""
       apple-app-id:
         description: The app's numeric Apple ID in App Store Connect (App Information), needed with bundle-id.
         type: string
-        default: ""
       play-notes-language:
         description: Language of the Google Play release notes; one of the store listing's languages.
         type: string
@@ -44,11 +41,9 @@ on:
       pages:
         description: Deploy the web builds to GitHub Pages once Pages is enabled for the repository.
         type: boolean
-        default: false
       environment:
         description: Deployment environment of the jobs that use signing or store credentials, e.g. one with required reviewers. Empty for none.
         type: string
-        default: ""
       build-tools:
         description: mise tools that the Android and web builds install (MISE_ENABLE_TOOLS).
         type: string
@@ -56,7 +51,6 @@ on:
       mise-version:
         description: The mise version to install; empty (the default) installs the newest release.
         type: string
-        default: ""
       macos-runner:
         description: Runner label of the iOS jobs.
         type: string
@@ -94,7 +88,6 @@ jobs:
     name: Check the release
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    permissions: {}
     outputs:
       mode: ${{ steps.version.outputs.mode }}
       channel: ${{ steps.version.outputs.channel }}
@@ -234,6 +227,10 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
         run: |
+          # Without them the app's build would fall back to the debug key.
+          : "${KEY_ALIAS:?Pass the ANDROID_KEY_ALIAS secret}"
+          : "${KEY_PASSWORD:?Pass the ANDROID_KEY_PASSWORD secret}"
+          : "${STORE_PASSWORD:?Pass the ANDROID_STORE_PASSWORD secret}"
           mise run build:apk
           mise run build:appbundle
       - name: Name the builds
@@ -243,7 +240,7 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
           out="$APP_DIR/build/app/outputs"
-          mkdir dist
+          mkdir -p dist
           for apk in "$out"/flutter-apk/app-*-release.apk; do
             abi=$(basename "$apk" -release.apk)
             cp "$apk" "dist/${PREFIX}-${TAG}-${abi#app-}.apk"
@@ -291,7 +288,7 @@ jobs:
           PREFIX: ${{ inputs.artifact-prefix }}
           TAG: ${{ needs.plan.outputs.tag }}
         run: |
-          mkdir dist
+          mkdir -p dist
           zip_file="$PWD/dist/${PREFIX}-${TAG}-web.zip"
           (cd "$APP_DIR/build/web" && zip -qr "$zip_file" .)
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -523,7 +520,6 @@ jobs:
       group: app-store
       cancel-in-progress: false
       queue: max
-    permissions: {}
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
     steps:
@@ -548,6 +544,7 @@ jobs:
           keys=$(mktemp -d)
           trap 'rm -rf "$keys"' EXIT
           printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$keys/AuthKey_${KEY_ID}.p8"
+          unset KEY # the tools below only need the file
           mkdir "$RUNNER_TEMP/work"
           cd "$RUNNER_TEMP/work"
           tar -xf ../Runner.xcarchive.tar
@@ -646,6 +643,7 @@ jobs:
           export KEY_PATH
           trap 'rm -f "$KEY_PATH"' EXIT
           printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$KEY_PATH"
+          unset KEY # the script only needs the file
           python3 .infra/scripts/app_store_submit.py
 
   pages:

@@ -185,6 +185,12 @@ def find_build(app_id, version, build_number, uploaded):
             build = builds[0]
             state = build["attributes"]["processingState"]
             if state == "VALID":
+                if build["attributes"].get("expired"):
+                    sys.exit(
+                        f"Build {version} ({build_number}) has expired in "
+                        "TestFlight (after 90 days) and cannot be submitted; "
+                        "publish a new beta."
+                    )
                 return build
             if state in ("FAILED", "INVALID"):
                 sys.exit(f"Build {version} ({build_number}) is {state}.")

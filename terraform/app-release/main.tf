@@ -61,6 +61,8 @@ resource "google_iam_workload_identity_pool_provider" "releases" {
   # release environment, after a reviewer approved the job).
   attribute_condition = join(" && ", compact([
     "assertion.repository_id == '${local.repository_id}'",
+    # Release runs check out their tag; no branch can get a token.
+    "assertion.ref.startsWith('refs/tags/')",
     var.environment == null ? null : "assertion.environment == '${var.environment}'",
     "assertion.job_workflow_ref.startsWith('${local.release_workflow}')",
   ]))

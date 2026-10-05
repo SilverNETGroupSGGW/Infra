@@ -14,6 +14,7 @@ on:
     branches: [main]
     paths:
       - terraform/**
+      - "!terraform/bootstrap/**" # applied by hand
       - .github/workflows/terraform.yml
   workflow_dispatch:
 
@@ -21,7 +22,6 @@ permissions: {}
 
 concurrency:
   group: terraform
-  cancel-in-progress: false
 
 env:
   TF_IN_AUTOMATION: "true"

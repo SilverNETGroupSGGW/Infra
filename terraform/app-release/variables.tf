@@ -17,6 +17,11 @@ variable "google_project_name" {
   description = "Display name of that project, when the module creates it."
   type        = string
   default     = null
+
+  validation {
+    condition     = var.google_project_name != null || !var.create_google_project
+    error_message = "Set google_project_name when the module creates the project."
+  }
 }
 
 variable "create_google_project" {

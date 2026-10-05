@@ -5,7 +5,7 @@
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:
-      - 'unexpected key "cache-mode" for "(workflow|job)" section'
+      - 'unexpected key "cache-mode" for "workflow" section'
       - 'unexpected key "queue" for "concurrency" section'
       - 'reusable workflow call "\$/\.github/workflows/[^"]+" at "uses" is not following the format'
       - 'property "workflow_(repository|sha)" is not defined in object type'

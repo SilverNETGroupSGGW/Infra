@@ -14,13 +14,17 @@
 locals {
   plan_wzim_project = "silvertimetable-bea41"
   dni_sggw_project  = "sggw-days"
+  plan_wzim_buckets = toset([
+    "${local.plan_wzim_project}.appspot.com",
+    "staging.${local.plan_wzim_project}.appspot.com",
+  ])
 }
 
 # Plan WZIM
 
 import {
   to = google_firebase_project.plan_wzim
-  id = "projects/silvertimetable-bea41"
+  id = "projects/${local.plan_wzim_project}"
 }
 
 resource "google_firebase_project" "plan_wzim" {
@@ -34,7 +38,7 @@ resource "google_firebase_project" "plan_wzim" {
 
 import {
   to = google_firebase_android_app.plan_wzim
-  id = "projects/silvertimetable-bea41/androidApps/1:494093391066:android:94ffbd475ce051c9e201e3"
+  id = "projects/${local.plan_wzim_project}/androidApps/1:494093391066:android:94ffbd475ce051c9e201e3"
 }
 
 resource "google_firebase_android_app" "plan_wzim" {
@@ -52,7 +56,7 @@ resource "google_firebase_android_app" "plan_wzim" {
 
 import {
   to = google_firebase_apple_app.plan_wzim
-  id = "projects/silvertimetable-bea41/iosApps/1:494093391066:ios:b915854468782e08e201e3"
+  id = "projects/${local.plan_wzim_project}/iosApps/1:494093391066:ios:b915854468782e08e201e3"
 }
 
 resource "google_firebase_apple_app" "plan_wzim" {
@@ -60,7 +64,7 @@ resource "google_firebase_apple_app" "plan_wzim" {
   project         = local.plan_wzim_project
   display_name    = "Plan WZIM (iOS)"
   bundle_id       = "com.silver.silvertimetable"
-  team_id         = "MZMZBQPXAR"
+  team_id         = local.apple.team_id
   deletion_policy = "ABANDON"
 
   lifecycle {
@@ -71,7 +75,7 @@ resource "google_firebase_apple_app" "plan_wzim" {
 # An older Apple app with the Android package name; no users.
 import {
   to = google_firebase_apple_app.plan_wzim_legacy
-  id = "projects/silvertimetable-bea41/iosApps/1:494093391066:ios:5785cfe0adf7dd85e201e3"
+  id = "projects/${local.plan_wzim_project}/iosApps/1:494093391066:ios:5785cfe0adf7dd85e201e3"
 }
 
 resource "google_firebase_apple_app" "plan_wzim_legacy" {
@@ -88,7 +92,7 @@ resource "google_firebase_apple_app" "plan_wzim_legacy" {
 
 import {
   to = google_firebase_web_app.plan_wzim
-  id = "projects/silvertimetable-bea41/webApps/1:494093391066:web:1be29c4e97bd07e1e201e3"
+  id = "projects/${local.plan_wzim_project}/webApps/1:494093391066:web:1be29c4e97bd07e1e201e3"
 }
 
 resource "google_firebase_web_app" "plan_wzim" {
@@ -100,7 +104,7 @@ resource "google_firebase_web_app" "plan_wzim" {
 
 import {
   to = google_firestore_database.plan_wzim
-  id = "projects/silvertimetable-bea41/databases/(default)"
+  id = "projects/${local.plan_wzim_project}/databases/(default)"
 }
 
 resource "google_firestore_database" "plan_wzim" {
@@ -118,13 +122,13 @@ resource "google_firestore_database" "plan_wzim" {
 # The legacy App Engine buckets of the project (multi-region EU): tracked, but
 # their settings stay as they are.
 import {
-  for_each = toset(["silvertimetable-bea41.appspot.com", "staging.silvertimetable-bea41.appspot.com"])
+  for_each = local.plan_wzim_buckets
   to       = google_storage_bucket.plan_wzim[each.key]
-  id       = "silvertimetable-bea41/${each.key}"
+  id       = "${local.plan_wzim_project}/${each.key}"
 }
 
 resource "google_storage_bucket" "plan_wzim" {
-  for_each = toset(["silvertimetable-bea41.appspot.com", "staging.silvertimetable-bea41.appspot.com"])
+  for_each = local.plan_wzim_buckets
 
   project  = local.plan_wzim_project
   name     = each.key
@@ -140,7 +144,7 @@ resource "google_storage_bucket" "plan_wzim" {
 
 import {
   to = google_firebase_project.dni_sggw
-  id = "projects/sggw-days"
+  id = "projects/${local.dni_sggw_project}"
 }
 
 resource "google_firebase_project" "dni_sggw" {
@@ -154,7 +158,7 @@ resource "google_firebase_project" "dni_sggw" {
 
 import {
   to = google_firebase_android_app.dni_sggw
-  id = "projects/sggw-days/androidApps/1:583939995714:android:7d3fc1983787b0610755db"
+  id = "projects/${local.dni_sggw_project}/androidApps/1:583939995714:android:7d3fc1983787b0610755db"
 }
 
 resource "google_firebase_android_app" "dni_sggw" {
@@ -171,7 +175,7 @@ resource "google_firebase_android_app" "dni_sggw" {
 
 import {
   to = google_firebase_apple_app.dni_sggw
-  id = "projects/sggw-days/iosApps/1:583939995714:ios:bb8207bc872f33f40755db"
+  id = "projects/${local.dni_sggw_project}/iosApps/1:583939995714:ios:bb8207bc872f33f40755db"
 }
 
 resource "google_firebase_apple_app" "dni_sggw" {
@@ -188,7 +192,7 @@ resource "google_firebase_apple_app" "dni_sggw" {
 
 import {
   to = google_firebase_web_app.dni_sggw
-  id = "projects/sggw-days/webApps/1:583939995714:web:64bb87337df191160755db"
+  id = "projects/${local.dni_sggw_project}/webApps/1:583939995714:web:64bb87337df191160755db"
 }
 
 resource "google_firebase_web_app" "dni_sggw" {
@@ -200,7 +204,7 @@ resource "google_firebase_web_app" "dni_sggw" {
 
 import {
   to = google_firestore_database.dni_sggw
-  id = "projects/sggw-days/databases/(default)"
+  id = "projects/${local.dni_sggw_project}/databases/(default)"
 }
 
 resource "google_firestore_database" "dni_sggw" {
@@ -218,7 +222,7 @@ resource "google_firestore_database" "dni_sggw" {
 # The default site; sggw_days deploys its releases.
 import {
   to = google_firebase_hosting_site.dni_sggw
-  id = "projects/sggw-days/sites/sggw-days"
+  id = "projects/${local.dni_sggw_project}/sites/sggw-days"
 }
 
 resource "google_firebase_hosting_site" "dni_sggw" {

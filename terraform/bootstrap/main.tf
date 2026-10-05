@@ -88,13 +88,9 @@ provider "github" {
   owner = "SilverNETGroupSGGW"
 }
 
-provider "google" {}
-
 provider "googleplay" {
   developer_id = "8827645756827128332" # KN Silver .NET
 }
-
-provider "tfe" {}
 
 data "github_repository" "infra" {
   name = "Infra"
@@ -156,13 +152,11 @@ import {
 resource "google_project" "apps" {
   for_each = var.apps
 
-  project_id          = each.value.project_id
-  name                = each.value.name
-  deletion_policy     = "PREVENT"
-  auto_create_network = true
+  project_id = each.value.project_id
+  name       = each.value.name
 
   lifecycle {
-    ignore_changes = [billing_account, org_id, folder_id, labels, auto_create_network]
+    ignore_changes = [billing_account, org_id, folder_id, labels]
   }
 }
 
@@ -285,58 +279,6 @@ resource "github_actions_variable" "terraform" {
   repository    = data.github_repository.infra.name
   variable_name = each.key
   value         = each.value
-}
-
-# The first run keyed the apps by project ID.
-
-moved {
-  from = google_project.apps["silvertimetable-bea41"]
-  to   = google_project.apps["plan_wzim"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/browser"]
-  to   = google_project_iam_member.terraform["plan_wzim roles/browser"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/iam.serviceAccountAdmin"]
-  to   = google_project_iam_member.terraform["plan_wzim roles/iam.serviceAccountAdmin"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/iam.workloadIdentityPoolAdmin"]
-  to   = google_project_iam_member.terraform["plan_wzim roles/iam.workloadIdentityPoolAdmin"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/serviceusage.serviceUsageAdmin"]
-  to   = google_project_iam_member.terraform["plan_wzim roles/serviceusage.serviceUsageAdmin"]
-}
-
-moved {
-  from = google_project.apps["sggw-days"]
-  to   = google_project.apps["dni_sggw"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["sggw-days roles/browser"]
-  to   = google_project_iam_member.terraform["dni_sggw roles/browser"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["sggw-days roles/iam.serviceAccountAdmin"]
-  to   = google_project_iam_member.terraform["dni_sggw roles/iam.serviceAccountAdmin"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["sggw-days roles/iam.workloadIdentityPoolAdmin"]
-  to   = google_project_iam_member.terraform["dni_sggw roles/iam.workloadIdentityPoolAdmin"]
-}
-
-moved {
-  from = google_project_iam_member.terraform["sggw-days roles/serviceusage.serviceUsageAdmin"]
-  to   = google_project_iam_member.terraform["dni_sggw roles/serviceusage.serviceUsageAdmin"]
 }
 
 # Created by a first run whose state was not kept; adopted if still unknown.

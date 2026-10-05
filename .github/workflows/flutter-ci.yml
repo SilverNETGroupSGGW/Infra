@@ -15,11 +15,9 @@ on:
       mise-version:
         description: The mise version to install; empty (the default) installs the newest release.
         type: string
-        default: ""
       codegen:
         description: Run `mise run codegen` and fail if it changes anything in the app's lib/ (generated code that was not committed).
         type: boolean
-        default: false
       android:
         description: Build the release APKs (`mise run build:apk`) and keep them as a workflow artifact.
         type: boolean
@@ -31,7 +29,6 @@ on:
       ios:
         description: Build the iOS app without code signing (`mise run build:ios`) on macOS. macOS minutes count ten times on private repositories.
         type: boolean
-        default: false
       macos-runner:
         description: Runner label of the iOS build.
         type: string
@@ -78,6 +75,8 @@ jobs:
           APP_DIR: ${{ inputs.app-dir }}
         run: |
           mise run codegen
+          # Also new files that the code generator wrote but nobody committed.
+          git add --intent-to-add -- "$APP_DIR/lib"
           git diff --exit-code -- "$APP_DIR/lib"
 
   build-android:

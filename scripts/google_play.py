@@ -31,7 +31,6 @@ NOTES_LIMIT = 500
 class ApiError(Exception):
     def __init__(self, status, body):
         super().__init__(f"HTTP {status}: {body}")
-        self.status = status
         self.body = body
 
 
