@@ -32,16 +32,19 @@ terraform {
 }
 
 # Each app's Firebase project is its Google Cloud project; the release sign-in
-# lives there next to the app's other parts. Project IDs cannot change, only
-# the display names.
-variable "app_projects" {
-  description = "Google Cloud projects of the apps in terraform/apps: project ID => display name."
-  type        = map(string)
+# lives there next to the app's other parts. Project IDs cannot change, so the
+# apps are keyed by name and the projects get the apps' names as display names.
+variable "apps" {
+  description = "The apps of terraform/apps: their Google Cloud project IDs and display names."
+  type = map(object({
+    project_id = string
+    name       = string
+  }))
   default = {
-    "silvertimetable-bea41" = "Plan WZIM"
-    "sggw-days"             = "Dni SGGW"
-    # Kampus SGGW, once its owner gives the club access to the project:
-    # "kampus-sggw-2021" = "Kampus SGGW"
+    plan_wzim = { project_id = "silvertimetable-bea41", name = "Plan WZIM" }
+    dni_sggw  = { project_id = "sggw-days", name = "Dni SGGW" }
+    # Once its owner gives the club access to the project:
+    # kampus_sggw = { project_id = "kampus-sggw-2021", name = "Kampus SGGW" }
   }
 }
 
@@ -63,6 +66,12 @@ variable "hcp_organization" {
   description = "HCP Terraform organization that keeps the state."
   type        = string
   default     = "silvernetgroupsggw"
+}
+
+variable "hcp_email" {
+  description = "Contact e-mail of the HCP Terraform organization."
+  type        = string
+  default     = "silvernetsggw@gmail.com"
 }
 
 variable "github_app_id" {
@@ -91,9 +100,7 @@ provider "googleplay" {
   developer_id = "8827645756827128332" # KN Silver .NET
 }
 
-provider "tfe" {
-  organization = var.hcp_organization
-}
+provider "tfe" {}
 
 data "github_repository" "infra" {
   name = "Infra"
@@ -104,11 +111,17 @@ locals {
   environment   = "terraform"
 }
 
+resource "tfe_organization" "silver" {
+  name  = var.hcp_organization
+  email = var.hcp_email
+}
+
 # The state of terraform/apps. Runs execute in the Terraform workflow, which
 # signs in to Google Cloud itself; HCP Terraform only keeps the state.
 resource "tfe_workspace" "apps" {
-  name        = "apps"
-  description = "terraform/apps of SilverNETGroupSGGW/Infra"
+  organization = tfe_organization.silver.name
+  name         = "apps"
+  description  = "terraform/apps of SilverNETGroupSGGW/Infra"
 }
 
 resource "tfe_workspace_settings" "apps" {
@@ -130,16 +143,16 @@ resource "google_project" "infra" {
 # The apps' existing projects, adopted for their display names. Terraform never
 # changes their billing or parent, and refuses to delete them.
 import {
-  for_each = var.app_projects
+  for_each = var.apps
   to       = google_project.apps[each.key]
-  id       = each.key
+  id       = each.value.project_id
 }
 
 resource "google_project" "apps" {
-  for_each = var.app_projects
+  for_each = var.apps
 
-  project_id          = each.key
-  name                = each.value
+  project_id          = each.value.project_id
+  name                = each.value.name
   deletion_policy     = "PREVENT"
   auto_create_network = true
 
@@ -207,20 +220,22 @@ resource "google_service_account_iam_member" "terraform_github" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repository_id}"
 }
 
-# What terraform/app-release creates in each app's project. With the
+# What terraform/apps manages in each app's project: the release sign-in
+# (terraform/app-release) and the app's Firebase resources. With the
 # organization, the same roles plus roles/resourcemanager.projectCreator go on
 # the apps folder for new apps.
 resource "google_project_iam_member" "terraform" {
   for_each = {
-    for pair in setproduct(keys(var.app_projects), [
+    for pair in setproduct(keys(var.apps), [
       "roles/browser",
+      "roles/firebase.admin",
       "roles/iam.serviceAccountAdmin",
       "roles/iam.workloadIdentityPoolAdmin",
       "roles/serviceusage.serviceUsageAdmin",
-    ]) : "${pair[0]} ${pair[1]}" => { project = pair[0], role = pair[1] }
+    ]) : "${pair[0]} ${pair[1]}" => { app = pair[0], role = pair[1] }
   }
 
-  project = google_project.apps[each.value.project].project_id
+  project = google_project.apps[each.value.app].project_id
   role    = each.value.role
   member  = google_service_account.terraform.member
 }
@@ -255,7 +270,7 @@ resource "github_actions_environment_variable" "terraform" {
   for_each = {
     TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.terraform.name
     TF_GOOGLE_SERVICE_ACCOUNT            = google_service_account.terraform.email
-    TF_CLOUD_ORGANIZATION                = var.hcp_organization
+    TF_CLOUD_ORGANIZATION                = tfe_organization.silver.name
     # TF_APPS_FOLDER_ID                  = google_folder.apps.folder_id
     TF_GITHUB_APP_ID              = var.github_app_id
     TF_GITHUB_APP_INSTALLATION_ID = var.github_app_installation_id
@@ -265,4 +280,56 @@ resource "github_actions_environment_variable" "terraform" {
   environment   = github_repository_environment.terraform.environment
   variable_name = each.key
   value         = each.value
+}
+
+# The first run keyed the apps by project ID.
+
+moved {
+  from = google_project.apps["silvertimetable-bea41"]
+  to   = google_project.apps["plan_wzim"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/browser"]
+  to   = google_project_iam_member.terraform["plan_wzim roles/browser"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/iam.serviceAccountAdmin"]
+  to   = google_project_iam_member.terraform["plan_wzim roles/iam.serviceAccountAdmin"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/iam.workloadIdentityPoolAdmin"]
+  to   = google_project_iam_member.terraform["plan_wzim roles/iam.workloadIdentityPoolAdmin"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["silvertimetable-bea41 roles/serviceusage.serviceUsageAdmin"]
+  to   = google_project_iam_member.terraform["plan_wzim roles/serviceusage.serviceUsageAdmin"]
+}
+
+moved {
+  from = google_project.apps["sggw-days"]
+  to   = google_project.apps["dni_sggw"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["sggw-days roles/browser"]
+  to   = google_project_iam_member.terraform["dni_sggw roles/browser"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["sggw-days roles/iam.serviceAccountAdmin"]
+  to   = google_project_iam_member.terraform["dni_sggw roles/iam.serviceAccountAdmin"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["sggw-days roles/iam.workloadIdentityPoolAdmin"]
+  to   = google_project_iam_member.terraform["dni_sggw roles/iam.workloadIdentityPoolAdmin"]
+}
+
+moved {
+  from = google_project_iam_member.terraform["sggw-days roles/serviceusage.serviceUsageAdmin"]
+  to   = google_project_iam_member.terraform["dni_sggw roles/serviceusage.serviceUsageAdmin"]
 }

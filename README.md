@@ -321,7 +321,7 @@ release environment (required reviewers, release tags allowed) and the
 repository variables the workflow reads. Secrets stay out of Terraform; set
 them with `gh secret set`.
 
-To add an app, add its project to `app_projects` of `terraform/bootstrap` and
+To add an app, add its project to `apps` of `terraform/bootstrap` and
 apply that (it gives the Terraform service account its roles there), then add
 a module block to `terraform/apps/main.tf` and merge it to `main`. The
 [Terraform workflow](.github/workflows/terraform.yml) plans the change and,

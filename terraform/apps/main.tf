@@ -1,6 +1,6 @@
 # Store release setup of the organization's apps (terraform/app-release),
 # applied by the Terraform workflow after a reviewer approves it. A new app is
-# a new module block here and its project in `app_projects` of
+# a new module block here and its project in `apps` of
 # terraform/bootstrap. Secrets are set with `gh secret set`.
 
 terraform {
