@@ -1,0 +1,661 @@
+name: Flutter release
+
+# Reusable: build a GitHub release of a Flutter app, attach the builds to it and
+# publish them to Google Play, App Store Connect and GitHub Pages.
+#
+# Call it from a workflow that runs `on: release: types: [published, released]`
+# (see README.md). The tag sets the version: a pre-release tagged X.Y.Z-beta.N
+# is a public beta, a release tagged X.Y.Z goes to production (a leading "v" is
+# optional), and turning a beta into a release promotes the beta's builds
+# without rebuilding them. The Google Play and App Store jobs run once the app
+# passes its store ID and the store variables are set.
+
+on:
+  workflow_call:
+    inputs:
+      app-dir:
+        description: Directory of the Flutter app (the one with pubspec.yaml), relative to the repository root.
+        type: string
+        default: .
+      artifact-prefix:
+        description: File name prefix of the release assets, e.g. `my-app` for my-app-1.2.0.aab.
+        type: string
+        default: ${{ github.event.repository.name }}
+      android-package:
+        description: Android application ID; turns on Google Play.
+        type: string
+        default: ""
+      android-keystore-path:
+        description: Where the build expects the upload keystore, relative to app-dir.
+        type: string
+        default: android/app/key.jks
+      bundle-id:
+        description: iOS bundle ID; turns on the iOS build and App Store Connect.
+        type: string
+        default: ""
+      apple-app-id:
+        description: The app's numeric Apple ID in App Store Connect (App Information), needed with bundle-id.
+        type: string
+        default: ""
+      play-notes-language:
+        description: Language of the Google Play release notes; one of the store listing's languages.
+        type: string
+        default: en-US
+      pages:
+        description: Deploy the web builds to GitHub Pages once Pages is enabled for the repository.
+        type: boolean
+        default: false
+      environment:
+        description: Deployment environment of the jobs that use signing or store credentials, e.g. one with required reviewers. Empty for none.
+        type: string
+        default: ""
+      build-tools:
+        description: mise tools that the Android and web builds install (MISE_ENABLE_TOOLS).
+        type: string
+        default: flutter,java
+      mise-version:
+        description: The mise version to install; empty (the default) installs the newest release.
+        type: string
+        default: ""
+      macos-runner:
+        description: Runner label of the iOS jobs.
+        type: string
+        default: macos-26
+      xcode-version:
+        description: Xcode version of the iOS jobs, as installed on the runner (/Applications/Xcode_<version>.app).
+        type: string
+        default: "26.6"
+    secrets:
+      ANDROID_KEYSTORE_BASE64:
+        description: The upload keystore (`base64 -w0 key.jks`).
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
+        required: false
+      ANDROID_STORE_PASSWORD:
+        required: false
+      APP_STORE_CONNECT_KEY:
+        description: Contents of the App Store Connect API key (.p8), Admin role.
+        required: false
+    outputs:
+      mode:
+        description: build, promote or skip.
+        value: ${{ jobs.plan.outputs.mode }}
+
+permissions: {}
+
+# Release runs must not restore anything from the Actions cache; the jobs also
+# turn their own caches off.
+cache-mode: none
+
+jobs:
+  plan:
+    name: Check the release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    outputs:
+      mode: ${{ steps.version.outputs.mode }}
+      channel: ${{ steps.version.outputs.channel }}
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      build-number: ${{ steps.version.outputs.build-number }}
+    steps:
+      - id: version
+        name: Read the version from the tag
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          TAG: ${{ github.event.release.tag_name }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ "$EVENT" != release ]; then
+            echo "::error::Call this workflow from a workflow that runs on release events."
+            exit 1
+          fi
+          # [v]X.Y.Z, or [v]X.Y.Z-<label><N> such as 1.2.0-beta.3 or 1.2.0-rc2.
+          semver='^v?(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-([0-9A-Za-z.-]*[A-Za-z.-])?([1-9][0-9]?))?$'
+          if [[ ! $TAG =~ $semver ]] || ((BASH_REMATCH[1] > 2099 || BASH_REMATCH[6] > 98)); then
+            echo "::error::$TAG is not a version tag: X.Y.Z for a release, X.Y.Z-beta.N for a pre-release (optional leading v; X up to 2099, Y, Z up to 99, N from 1 to 98)."
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          pre=${BASH_REMATCH[4]}
+          # Grows with every version and pre-release, and a release (99) sorts
+          # after its pre-releases: 1.2.3-beta.4 builds 1020304, 1.2.3 builds
+          # 1020399. A promoted beta keeps its build number.
+          build_number=$((BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 10000 + BASH_REMATCH[3] * 100 + ${BASH_REMATCH[6]:-99}))
+          case "$ACTION/$PRERELEASE/${pre:+pre}" in
+            published/true/pre) mode=build channel=beta ;;
+            published/false/) mode=build channel=prod ;;
+            released/*/pre) mode=promote channel=prod ;;
+            released/*/)
+              # Published directly as a release: the published run builds it.
+              mode=skip channel=prod
+              echo "::notice::The published run of $TAG builds it. If that run failed because \"pre-release\" was ticked by mistake, delete the release (keep the tag) and publish it again."
+              ;;
+            published/true/)
+              echo "::error::A pre-release needs a pre-release tag such as $TAG-beta.1: delete this release (keep the tag) and publish it again, as a release or with a pre-release tag."
+              exit 1
+              ;;
+            published/false/pre)
+              echo "::error::$TAG is a pre-release tag: delete this release (keep the tag) and publish it again, as a pre-release or as a release tagged ${TAG%%-*}."
+              exit 1
+              ;;
+            *)
+              echo "::error::Unexpected release action $ACTION."
+              exit 1
+              ;;
+          esac
+          {
+            echo "mode=$mode"
+            echo "channel=$channel"
+            echo "tag=$TAG"
+            echo "version=$version"
+            echo "build-number=$build_number"
+          } >> "$GITHUB_OUTPUT"
+          echo "$TAG: $mode ($channel), version $version, build $build_number" >> "$GITHUB_STEP_SUMMARY"
+      # Fail before any build when a store is half set up. Secrets kept in an
+      # environment only reach the jobs that name it; those jobs check them.
+      - if: ${{ steps.version.outputs.mode != 'skip' }}
+        name: Check the signing and store settings
+        env:
+          BUILD: ${{ steps.version.outputs.mode == 'build' }}
+          ANDROID_SIGNING: >-
+            ${{ inputs.environment != '' || secrets.ANDROID_KEYSTORE_BASE64 != ''
+            && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != ''
+            && secrets.ANDROID_STORE_PASSWORD != '' }}
+          PLAY: ${{ inputs.android-package != '' && vars.GOOGLE_PLAY_SERVICE_ACCOUNT != '' }}
+          PLAY_PROVIDER: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          APP_STORE: ${{ inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != '' }}
+          APP_STORE_KEY: ${{ inputs.environment != '' || secrets.APP_STORE_CONNECT_KEY != '' }}
+          ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_ID: ${{ inputs.apple-app-id }}
+        run: |
+          status=0
+          missing() { echo "::error::$1"; status=1; }
+          if [ "$BUILD" = true ] && [ "$ANDROID_SIGNING" != true ]; then
+            missing "Pass the ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD and ANDROID_STORE_PASSWORD secrets to sign the Android builds."
+          fi
+          if [ "$PLAY" = true ] && [ -z "$PLAY_PROVIDER" ]; then
+            missing "Set the GOOGLE_WORKLOAD_IDENTITY_PROVIDER variable for Google Play."
+          fi
+          if [ "$APP_STORE" = true ]; then
+            [ "$APP_STORE_KEY" = true ] || missing "Pass the APP_STORE_CONNECT_KEY secret for App Store Connect."
+            [ -n "$ISSUER_ID" ] || missing "Set the APP_STORE_CONNECT_ISSUER_ID variable for App Store Connect."
+            if [ "$BUILD" = true ]; then
+              [ -n "$TEAM_ID" ] || missing "Set the APPLE_TEAM_ID variable to sign the iOS app."
+              [ -n "$APPLE_APP_ID" ] || missing "Pass the apple-app-id input to upload the iOS app."
+            fi
+          fi
+          exit "$status"
+
+  android:
+    name: Android
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'build' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read # clone the repository
+    env:
+      MISE_ENABLE_TOOLS: ${{ inputs.build-tools }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          cache: false
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-disabled: true
+      - name: Set the version from the tag
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}+${{ needs.plan.outputs.build-number }}
+        run: |
+          sed -i.bak '/^version:/d' pubspec.yaml && rm pubspec.yaml.bak
+          printf '\nversion: %s\n' "$VERSION" >> pubspec.yaml
+      - name: Install the signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PATH: ${{ inputs.app-dir }}/${{ inputs.android-keystore-path }}
+        run: |
+          : "${KEYSTORE_BASE64:?Pass the ANDROID_KEYSTORE_BASE64 secret}"
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+      - name: Build the APKs and the App Bundle
+        env:
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          mise run build:apk
+          mise run build:appbundle
+      - name: Name the builds
+        env:
+          APP_DIR: ${{ inputs.app-dir }}
+          PREFIX: ${{ inputs.artifact-prefix }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          out="$APP_DIR/build/app/outputs"
+          mkdir dist
+          for apk in "$out"/flutter-apk/app-*-release.apk; do
+            abi=$(basename "$apk" -release.apk)
+            cp "$apk" "dist/${PREFIX}-${TAG}-${abi#app-}.apk"
+          done
+          cp "$out/bundle/release/app-release.aab" "dist/${PREFIX}-${TAG}.aab"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: android
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  web:
+    name: Web
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'build' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # clone the repository
+    env:
+      MISE_ENABLE_TOOLS: ${{ inputs.build-tools }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          cache: false
+      - name: Set the version from the tag
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}+${{ needs.plan.outputs.build-number }}
+        run: |
+          sed -i.bak '/^version:/d' pubspec.yaml && rm pubspec.yaml.bak
+          printf '\nversion: %s\n' "$VERSION" >> pubspec.yaml
+      - name: Build
+        env:
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+        run: mise run build:web --channel "$CHANNEL"
+      - name: Zip the build
+        env:
+          APP_DIR: ${{ inputs.app-dir }}
+          PREFIX: ${{ inputs.artifact-prefix }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir dist
+          zip_file="$PWD/dist/${PREFIX}-${TAG}-web.zip"
+          (cd "$APP_DIR/build/web" && zip -qr "$zip_file" .)
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Attach to the release
+    needs: [plan, android, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # Only this job can write to the repository. The build jobs run third-party
+    # build code (Gradle plugins, Dart build hooks); this one runs none.
+    permissions:
+      contents: write # attach the builds to the release
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: android
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: web
+          path: dist
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
+
+  promote:
+    name: Check the beta's builds
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'promote' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # read the release
+    steps:
+      - name: Check that the release workflow built the beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFIX: ${{ inputs.artifact-prefix }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          # The run may have waited for the beta's own run; check the live state.
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" != false ]; then
+            echo "::error::$TAG is a pre-release again; not promoting it."
+            exit 1
+          fi
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for name in "${PREFIX}-${TAG}.aab" "${PREFIX}-${TAG}-web.zip"; do
+            if ! grep -qxF "$name" <<< "$assets"; then
+              echo "::error::$TAG has no $name; only a beta built by the release workflow can be promoted."
+              exit 1
+            fi
+          done
+
+  google-play:
+    name: Google Play
+    needs: [plan, publish, promote]
+    if: >-
+      ${{ !cancelled() && inputs.android-package != '' && vars.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
+      && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    # The Play Developer API allows one open edit at a time.
+    concurrency:
+      group: google-play
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read # read the release notes and the scripts
+      id-token: write # authenticate to Google Cloud (Workload Identity Federation)
+    steps:
+      # The job may have waited behind other releases' store jobs: check the
+      # live state again before changing anything.
+      - if: ${{ needs.plan.outputs.mode == 'promote' }}
+        name: Check that the release is still a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" != false ]; then
+            echo "::error::$TAG is a pre-release again; not promoting it."
+            exit 1
+          fi
+      # The scripts of the workflow version the caller pinned.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .flutter-workflows
+          persist-credentials: false
+          sparse-checkout: scripts
+      # From the release rather than the run's artifacts, so that the job can
+      # be re-run after the artifacts expire.
+      - if: ${{ needs.plan.outputs.mode == 'build' }}
+        name: Download the App Bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREFIX: ${{ inputs.artifact-prefix }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "${PREFIX}-${TAG}.aab" --dir dist
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Upload or promote
+        env:
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_NAME: ${{ inputs.android-package }}
+          BUNDLE_PATH: dist/${{ inputs.artifact-prefix }}-${{ needs.plan.outputs.tag }}.aab
+          MODE: ${{ needs.plan.outputs.mode }}
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION_CODE: ${{ needs.plan.outputs.build-number }}
+          NOTES_LANGUAGE: ${{ inputs.play-notes-language }}
+        run: python3 .flutter-workflows/scripts/google_play.py
+
+  ios-archive:
+    name: iOS archive
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'build' && inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != '' }}
+    runs-on: ${{ inputs.macos-runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read # clone the repository
+    outputs:
+      push: ${{ steps.pack.outputs.push }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
+      # Only Flutter is needed.
+      MISE_ENABLE_TOOLS: flutter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the export compliance answer
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          ANSWER: ${{ vars.APP_STORE_USES_NON_EXEMPT_ENCRYPTION }}
+        run: |
+          case "$ANSWER" in
+            true | false) exit 0 ;;
+            "") if grep -q ITSAppUsesNonExemptEncryption ios/Runner/Info.plist; then exit 0; fi ;;
+          esac
+          echo "::error::TestFlight and App Review need the export compliance answer: set the APP_STORE_USES_NON_EXEMPT_ENCRYPTION variable to false or true, or add ITSAppUsesNonExemptEncryption to ios/Runner/Info.plist."
+          exit 1
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          cache: false
+      - name: Set the version from the tag
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}+${{ needs.plan.outputs.build-number }}
+        run: |
+          sed -i.bak '/^version:/d' pubspec.yaml && rm pubspec.yaml.bak
+          printf '\nversion: %s\n' "$VERSION" >> pubspec.yaml
+      - name: Archive
+        working-directory: ${{ inputs.app-dir }}
+        env:
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        # Signed ad hoc, so the archive keeps its entitlements; the export signs
+        # it for distribution. Signing for real here would need a development
+        # certificate on the runner.
+        run: |
+          mise x -- flutter build ios --release --config-only --no-codesign
+          xcrun xcodebuild archive \
+            -clonedSourcePackagesDirPath "$PWD/build/ios/SourcePackages" \
+            -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
+            -sdk iphoneos -destination generic/platform=iOS \
+            -archivePath "$PWD/build/ios/archive/Runner.xcarchive" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY=- AD_HOC_CODE_SIGNING_ALLOWED=YES
+      - id: pack
+        name: Check and pack the archive
+        working-directory: ${{ inputs.app-dir }}/build/ios/archive
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          BUILD_NUMBER: ${{ needs.plan.outputs.build-number }}
+        run: |
+          app=Runner.xcarchive/Products/Applications/Runner.app
+          plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$2"; }
+          if [ "$(plist CFBundleShortVersionString "$app/Info.plist")" != "$VERSION" ] ||
+            [ "$(plist CFBundleVersion "$app/Info.plist")" != "$BUILD_NUMBER" ]; then
+            echo "::error::The archive does not have version $VERSION ($BUILD_NUMBER)."
+            exit 1
+          fi
+          # An app with push notifications must keep them up to the upload.
+          if grep -qs aps-environment ../../../ios/Runner/*.entitlements; then
+            codesign -d --entitlements entitlements.plist --xml "$app"
+            if ! plist aps-environment entitlements.plist; then
+              echo "::error::The archive lost its push notification entitlement."
+              exit 1
+            fi
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          fi
+          # A tar keeps the executable bits, which artifacts drop.
+          tar -cf Runner.xcarchive.tar Runner.xcarchive
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ios-archive
+          path: ${{ inputs.app-dir }}/build/ios/archive/Runner.xcarchive.tar
+          if-no-files-found: error
+          # Long enough to re-run the upload after a blocked App Store Connect.
+          retention-days: 7
+
+  ios-upload:
+    name: Upload to App Store Connect
+    needs: [plan, ios-archive]
+    runs-on: ${{ inputs.macos-runner }}
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    # Holds the App Store Connect key and runs no project build code.
+    concurrency:
+      group: app-store
+      cancel-in-progress: false
+      queue: max
+    permissions: {}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ios-archive
+          path: ${{ runner.temp }}
+      - name: Sign and upload
+        env:
+          KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_APP_ID: ${{ inputs.apple-app-id }}
+          BUNDLE_ID: ${{ inputs.bundle-id }}
+          PUSH: ${{ needs.ios-archive.outputs.push }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          BUILD_NUMBER: ${{ needs.plan.outputs.build-number }}
+        run: |
+          # The archive comes from a job that runs build code: keep the key in a
+          # directory of its own that none of the archive's entries can lead to.
+          keys=$(mktemp -d)
+          trap 'rm -rf "$keys"' EXIT
+          printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$keys/AuthKey_${KEY_ID}.p8"
+          mkdir "$RUNNER_TEMP/work"
+          cd "$RUNNER_TEMP/work"
+          tar -xf ../Runner.xcarchive.tar
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          # Cloud signing: the distribution certificate stays with Apple.
+          xcrun xcodebuild -exportArchive \
+            -archivePath Runner.xcarchive -exportPath export \
+            -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates \
+            -authenticationKeyPath "$keys/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+          if [ "$PUSH" = true ]; then
+            unzip -q export/*.ipa -d ipa
+            codesign -d --entitlements entitlements.plist --xml ipa/Payload/Runner.app
+            if [ "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' entitlements.plist)" != production ]; then
+              echo "::error::The exported app is not signed for production push notifications."
+              exit 1
+            fi
+          fi
+          # The Xcode 26 altool can exit 0 after a failed upload, so its output
+          # decides as well.
+          API_PRIVATE_KEYS_DIR="$keys" xcrun altool --upload-package export/*.ipa \
+            --platform ios --apple-id "$APPLE_APP_ID" --bundle-id "$BUNDLE_ID" \
+            --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$VERSION" \
+            --api-key "$KEY_ID" --api-issuer "$ISSUER_ID" --wait 2>&1 | tee altool.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ] || grep -qE 'UPLOAD FAILED|Failed to upload' altool.log; then
+            echo "::error::altool did not upload the build (exit $status); see its output above."
+            exit 1
+          fi
+
+  app-store:
+    # Opens a beta's TestFlight build to public testers; submits a release or a
+    # promoted beta for App Review.
+    name: App Store Connect
+    needs: [plan, ios-upload, promote]
+    if: >-
+      ${{ !cancelled() && inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != ''
+      && (needs.ios-upload.result == 'success' || needs.promote.result == 'success') }}
+    runs-on: ubuntu-24.04
+    # Waits for App Store Connect to process a new upload.
+    timeout-minutes: 90
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: app-store
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read # read the release notes and the scripts
+    steps:
+      # The job may have waited behind other releases' store jobs: check the
+      # live state again before changing anything.
+      - if: ${{ needs.plan.outputs.mode == 'promote' }}
+        name: Check that the release is still a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" != false ]; then
+            echo "::error::$TAG is a pre-release again; not promoting it."
+            exit 1
+          fi
+      # The scripts of the workflow version the caller pinned.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .flutter-workflows
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: Finish the upload
+        env:
+          KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
+          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_ID: ${{ inputs.bundle-id }}
+          MODE: ${{ needs.plan.outputs.mode }}
+          CHANNEL: ${{ needs.plan.outputs.channel }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          BUILD_NUMBER: ${{ needs.plan.outputs.build-number }}
+          USES_NON_EXEMPT_ENCRYPTION: ${{ vars.APP_STORE_USES_NON_EXEMPT_ENCRYPTION }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${KEY_ID}.p8"
+          export KEY_PATH
+          trap 'rm -f "$KEY_PATH"' EXIT
+          printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$KEY_PATH"
+          python3 .flutter-workflows/scripts/app_store_submit.py
+
+  pages:
+    name: GitHub Pages
+    needs: [plan, publish, promote]
+    if: >-
+      ${{ !cancelled() && inputs.pages && github.event.repository.has_pages
+      && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
+    permissions:
+      contents: read # read the releases and their web builds
+      pages: write # publish the site
+      id-token: write # authenticate the Pages deployment (OIDC)
+    uses: $/.github/workflows/flutter-pages.yml
