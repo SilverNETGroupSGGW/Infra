@@ -338,3 +338,24 @@ moved {
   from = google_project_iam_member.terraform["sggw-days roles/serviceusage.serviceUsageAdmin"]
   to   = google_project_iam_member.terraform["dni_sggw roles/serviceusage.serviceUsageAdmin"]
 }
+
+# Created by a first run whose state was not kept; adopted if still unknown.
+import {
+  to = google_project.infra
+  id = var.infra_project_id
+}
+
+import {
+  to = google_service_account.terraform
+  id = "projects/${var.infra_project_id}/serviceAccounts/terraform@${var.infra_project_id}.iam.gserviceaccount.com"
+}
+
+import {
+  to = github_repository_environment.terraform
+  id = "Infra:terraform"
+}
+
+import {
+  to = github_repository_environment_deployment_policy.terraform_main
+  id = "Infra:terraform:62064227"
+}
