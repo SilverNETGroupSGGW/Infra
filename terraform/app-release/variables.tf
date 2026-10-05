@@ -9,7 +9,7 @@ variable "android_package" {
 }
 
 variable "google_project_id" {
-  description = "ID of the Google Cloud project for the app's Google Play releases."
+  description = "ID of the app's Google Cloud project, which holds its Google Play release sign-in."
   type        = string
 }
 

@@ -28,7 +28,7 @@ terraform {
 # Without a Google Cloud organization (silver.sggw.pl, later), the projects
 # have no parent and are created here by a person, as service accounts can
 # only create projects in an organization. With one, uncomment org_id and the
-# releases folder, and let terraform/apps create the projects instead.
+# apps folder, and let terraform/apps create the projects instead.
 #
 # variable "org_id" {
 #   description = "Numeric ID of the Google Cloud organization (gcloud organizations list)."
@@ -36,12 +36,12 @@ terraform {
 # }
 
 variable "app_projects" {
-  description = "Release projects of the apps in terraform/apps: project ID => display name."
+  description = "Google Cloud projects of the apps in terraform/apps: project ID => display name."
   type        = map(string)
   default = {
-    "plan-wzim-releases"   = "Plan WZIM releases"
-    "dni-sggw-releases"    = "Dni SGGW releases"
-    "kampus-sggw-releases" = "Kampus SGGW releases"
+    "plan-wzim"   = "Plan WZIM"
+    "dni-sggw"    = "Dni SGGW"
+    "kampus-sggw" = "Kampus SGGW"
   }
 }
 
@@ -91,8 +91,8 @@ locals {
   environment   = "terraform"
 }
 
-# resource "google_folder" "releases" {
-#   display_name = "releases"
+# resource "google_folder" "apps" {
+#   display_name = "apps"
 #   parent       = "organizations/${var.org_id}"
 # }
 
@@ -108,7 +108,7 @@ resource "google_project" "apps" {
 
   project_id = each.key
   name       = each.value
-  # folder_id  = google_folder.releases.folder_id
+  # folder_id  = google_folder.apps.folder_id
 }
 
 resource "google_project_service" "infra" {
@@ -195,7 +195,7 @@ resource "google_storage_bucket_iam_member" "terraform_state" {
 
 # What terraform/app-release creates in each app's project. With the
 # organization, the same roles plus roles/resourcemanager.projectCreator go on
-# the releases folder instead.
+# the apps folder instead.
 resource "google_project_iam_member" "terraform" {
   for_each = {
     for pair in setproduct(keys(var.app_projects), [
@@ -242,7 +242,7 @@ resource "github_actions_environment_variable" "terraform" {
     TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.terraform.name
     TF_GOOGLE_SERVICE_ACCOUNT            = google_service_account.terraform.email
     TF_STATE_BUCKET                      = google_storage_bucket.state.name
-    # TF_RELEASES_FOLDER_ID              = google_folder.releases.folder_id
+    # TF_APPS_FOLDER_ID              = google_folder.apps.folder_id
     TF_GITHUB_APP_ID              = var.github_app_id
     TF_GITHUB_APP_INSTALLATION_ID = var.github_app_installation_id
   }

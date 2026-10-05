@@ -30,10 +30,10 @@ terraform {
 # The apps' projects come from terraform/bootstrap while there is no Google
 # Cloud organization (silver.sggw.pl, later). With one, uncomment this and the
 # google_folder_id lines, drop create_google_project, and the modules create
-# the projects in the releases folder.
+# the projects in the apps folder.
 #
-# variable "releases_folder_id" {
-#   description = "Google Cloud folder of the apps' projects (TF_RELEASES_FOLDER_ID of the terraform environment)."
+# variable "apps_folder_id" {
+#   description = "Google Cloud folder of the apps' projects (TF_APPS_FOLDER_ID of the terraform environment)."
 #   type        = string
 # }
 
@@ -79,9 +79,9 @@ module "plan_wzim" {
 
   repository            = "SilverTimetable2"
   android_package       = "com.silvernet.silvertimetable"
-  google_project_id     = "plan-wzim-releases"
+  google_project_id     = "plan-wzim"
   create_google_project = false # from terraform/bootstrap
-  # google_folder_id    = var.releases_folder_id
+  # google_folder_id    = var.apps_folder_id
   # GitHub Free has no environments in private repositories; "release" once
   # the repository is public.
   environment       = null
@@ -102,9 +102,9 @@ module "dni_sggw" {
 
   repository            = "sggw_days"
   android_package       = "com.silvernet.sggw_days"
-  google_project_id     = "dni-sggw-releases"
+  google_project_id     = "dni-sggw"
   create_google_project = false # from terraform/bootstrap
-  # google_folder_id    = var.releases_folder_id
+  # google_folder_id    = var.apps_folder_id
   environment = null
 
   apple_team_id               = local.apple.team_id
@@ -118,9 +118,9 @@ module "kampus_sggw" {
 
   repository            = "kampus_sggw"
   android_package       = "com.silvers.kampus_sggw_remake"
-  google_project_id     = "kampus-sggw-releases"
+  google_project_id     = "kampus-sggw"
   create_google_project = false # from terraform/bootstrap
-  # google_folder_id    = var.releases_folder_id
+  # google_folder_id    = var.apps_folder_id
   environment = null
 
   apple_team_id               = local.apple.team_id

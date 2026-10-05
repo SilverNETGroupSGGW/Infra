@@ -36,7 +36,7 @@ jobs:
     outputs:
       changes: ${{ steps.plan.outputs.changes }}
     env:
-      # TF_VAR_releases_folder_id: ${{ vars.TF_RELEASES_FOLDER_ID }} (with the Google Cloud organization)
+      # TF_VAR_apps_folder_id: ${{ vars.TF_APPS_FOLDER_ID }} (with the Google Cloud organization)
       TF_VAR_github_app_id: ${{ vars.TF_GITHUB_APP_ID }}
       TF_VAR_github_app_installation_id: ${{ vars.TF_GITHUB_APP_INSTALLATION_ID }}
     steps:
@@ -94,7 +94,7 @@ jobs:
       contents: read # clone the repository
       id-token: write # sign in to Google Cloud (Workload Identity Federation)
     env:
-      # TF_VAR_releases_folder_id: ${{ vars.TF_RELEASES_FOLDER_ID }} (with the Google Cloud organization)
+      # TF_VAR_apps_folder_id: ${{ vars.TF_APPS_FOLDER_ID }} (with the Google Cloud organization)
       TF_VAR_github_app_id: ${{ vars.TF_GITHUB_APP_ID }}
       TF_VAR_github_app_installation_id: ${{ vars.TF_GITHUB_APP_INSTALLATION_ID }}
     steps:

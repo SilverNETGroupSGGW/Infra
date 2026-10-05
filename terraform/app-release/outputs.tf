@@ -1,6 +1,6 @@
 output "google_play_service_account" {
   description = "Service account that publishes the app on Google Play."
-  value       = google_service_account.play_publisher.email
+  value       = google_service_account.releases.email
 }
 
 output "secrets_command" {

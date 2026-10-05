@@ -45,10 +45,10 @@ resource "google_iam_workload_identity_pool" "github" {
   depends_on = [google_project_service.release]
 }
 
-resource "google_iam_workload_identity_pool_provider" "flutter_release" {
+resource "google_iam_workload_identity_pool_provider" "releases" {
   project                            = local.project_id
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
-  workload_identity_pool_provider_id = "flutter-release"
+  workload_identity_pool_provider_id = "releases"
   display_name                       = "flutter-release.yml"
 
   attribute_mapping = {
@@ -68,32 +68,32 @@ resource "google_iam_workload_identity_pool_provider" "flutter_release" {
   }
 }
 
-resource "google_service_account" "play_publisher" {
+resource "google_service_account" "releases" {
   project      = local.project_id
-  account_id   = "play-publisher"
+  account_id   = "releases"
   display_name = "Google Play releases of ${var.repository}"
 
   depends_on = [google_project_service.release]
 }
 
-resource "google_service_account_iam_member" "play_publisher_github" {
-  service_account_id = google_service_account.play_publisher.name
+resource "google_service_account_iam_member" "releases_github" {
+  service_account_id = google_service_account.releases.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repository_id}"
 }
 
 # The Play Console invite of the service account, limited to this app's
 # releases.
-resource "googleplay_user" "play_publisher" {
-  email = google_service_account.play_publisher.email
+resource "googleplay_user" "releases" {
+  email = google_service_account.releases.email
   # The provider requires an account-wide permission; this is the narrowest
   # (read-only crash and vitals data).
   global_permissions = ["CAN_VIEW_APP_QUALITY_GLOBAL"]
 }
 
-resource "googleplay_app_iam" "play_publisher" {
+resource "googleplay_app_iam" "releases" {
   app_id  = var.android_package
-  user_id = googleplay_user.play_publisher.email
+  user_id = googleplay_user.releases.email
   permissions = [
     "CAN_MANAGE_TRACK_APKS",  # Release to testing tracks
     "CAN_MANAGE_PUBLIC_APKS", # Release to production, exclude devices, and use Play App Signing
@@ -143,8 +143,8 @@ locals {
 resource "github_actions_variable" "release" {
   for_each = merge(
     {
-      GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.flutter_release.name
-      GOOGLE_PLAY_SERVICE_ACCOUNT       = google_service_account.play_publisher.email
+      GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.releases.name
+      GOOGLE_PLAY_SERVICE_ACCOUNT       = google_service_account.releases.email
     },
     { for name, value in local.app_store_variables : name => value if value != null },
   )
