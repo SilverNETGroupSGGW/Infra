@@ -35,11 +35,8 @@ resource "google_project_service" "release" {
 
   project = local.project_id
   service = each.value
-
-  # The project may be shared with the app's other parts (Firebase), which may
-  # use these APIs too.
-  disable_on_destroy         = false
-  disable_dependent_services = false
+  # Never disabled on destroy (the provider default): the project is shared
+  # with the app's other parts (Firebase), which may use these APIs too.
 }
 
 resource "google_iam_workload_identity_pool" "github" {

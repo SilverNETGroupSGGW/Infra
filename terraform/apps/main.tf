@@ -69,10 +69,16 @@ provider "github" {
   }
 }
 
-provider "google" {}
+# API quota is charged to the project of each resource (the apps' projects,
+# where the APIs are enabled), not to the Terraform service account's project.
+provider "google" {
+  user_project_override = true
+}
 
 # Firebase resources (firebase.tf).
-provider "google-beta" {}
+provider "google-beta" {
+  user_project_override = true
+}
 
 provider "googleplay" {
   developer_id = "8827645756827128332" # KN Silver .NET

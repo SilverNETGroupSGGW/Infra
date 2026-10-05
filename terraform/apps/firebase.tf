@@ -43,7 +43,7 @@ resource "google_firebase_android_app" "plan_wzim" {
   deletion_policy = "ABANDON"
 
   lifecycle {
-    ignore_changes = [display_name]
+    ignore_changes = [display_name, sha256_hashes]
   }
 }
 
@@ -101,14 +101,14 @@ import {
 }
 
 resource "google_firestore_database" "plan_wzim" {
-  project         = local.plan_wzim_project
-  name            = "(default)"
-  location_id     = "eur3"
-  type            = "FIRESTORE_NATIVE"
-  deletion_policy = "ABANDON"
+  project     = local.plan_wzim_project
+  name        = "(default)"
+  location_id = "eur3"
+  type        = "FIRESTORE_NATIVE"
 
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [point_in_time_recovery_enablement]
   }
 }
 
@@ -142,6 +142,10 @@ resource "google_firebase_storage_bucket" "plan_wzim" {
   provider  = google-beta
   project   = local.plan_wzim_project
   bucket_id = google_storage_bucket.plan_wzim["silvertimetable-bea41.appspot.com"].name
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # Dni SGGW
@@ -212,14 +216,14 @@ import {
 }
 
 resource "google_firestore_database" "dni_sggw" {
-  project         = local.dni_sggw_project
-  name            = "(default)"
-  location_id     = "europe-central2"
-  type            = "FIRESTORE_NATIVE"
-  deletion_policy = "ABANDON"
+  project     = local.dni_sggw_project
+  name        = "(default)"
+  location_id = "europe-central2"
+  type        = "FIRESTORE_NATIVE"
 
   lifecycle {
     prevent_destroy = true
+    ignore_changes  = [point_in_time_recovery_enablement]
   }
 }
 
@@ -236,5 +240,7 @@ resource "google_firebase_hosting_site" "dni_sggw" {
 
   lifecycle {
     prevent_destroy = true
+    # Linked to a web app (or not) in the console.
+    ignore_changes = [app_id]
   }
 }
