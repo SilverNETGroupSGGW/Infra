@@ -1,0 +1,163 @@
+name: Flutter CI
+
+# Reusable: lint, test and build a Flutter app on every push and pull request.
+# The calling repository provides the mise tasks of the task contract (see
+# README.md): check, build:apk, build:web, and codegen / build:ios if those
+# inputs are on.
+
+on:
+  workflow_call:
+    inputs:
+      app-dir:
+        description: Directory of the Flutter app (the one with pubspec.yaml), relative to the repository root.
+        type: string
+        default: .
+      mise-version:
+        description: The mise version to install; empty (the default) installs the newest release.
+        type: string
+        default: ""
+      codegen:
+        description: Run `mise run codegen` and fail if it changes anything in the app's lib/ (generated code that was not committed).
+        type: boolean
+        default: false
+      android:
+        description: Build the release APKs (`mise run build:apk`) and keep them as a workflow artifact.
+        type: boolean
+        default: true
+      web:
+        description: Build the web app (`mise run build:web`).
+        type: boolean
+        default: true
+      ios:
+        description: Build the iOS app without code signing (`mise run build:ios`) on macOS. macOS minutes count ten times on private repositories.
+        type: boolean
+        default: false
+      macos-runner:
+        description: Runner label of the iOS build.
+        type: string
+        default: macos-26
+      xcode-version:
+        description: Xcode version of the iOS build, as installed on the runner (/Applications/Xcode_<version>.app).
+        type: string
+        default: "26.6"
+
+permissions: {}
+
+env:
+  # The Android build uses the runner's preinstalled Android SDK (licenses
+  # accepted), so a mise android-sdk tool is never installed here.
+  MISE_DISABLE_TOOLS: android-sdk
+
+jobs:
+  check:
+    name: Lint and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # clone the repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # secret scanners such as gitleaks read the full history
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          # The toolchain entry is large (Flutter is about 1.7 GB): save it from
+          # the default branch only, so pull requests reuse it.
+          cache_save: ${{ github.ref_name == github.event.repository.default_branch }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles(format('{0}/pubspec.lock', inputs.app-dir)) }}
+      - name: Lint and test
+        run: mise run check
+      - if: ${{ inputs.codegen }}
+        name: Check that generated code is up to date
+        env:
+          APP_DIR: ${{ inputs.app-dir }}
+        run: |
+          mise run codegen
+          git diff --exit-code -- "$APP_DIR/lib"
+
+  build-android:
+    name: Build Android
+    needs: check
+    if: ${{ inputs.android }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read # clone the repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          cache_save: ${{ github.ref_name == github.event.repository.default_branch }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles(format('{0}/pubspec.lock', inputs.app-dir)) }}
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-provider: basic
+      # Without signing secrets the app's release build has to fall back to a
+      # debug or unsigned key (see README.md, "Task contract").
+      - name: Build release APKs
+        run: mise run build:apk
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apk
+          path: ${{ inputs.app-dir }}/build/app/outputs/flutter-apk/*.apk
+          retention-days: 7
+          if-no-files-found: error
+
+  build-web:
+    name: Build web
+    needs: check
+    if: ${{ inputs.web }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # clone the repository
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          cache_save: ${{ github.ref_name == github.event.repository.default_branch }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ hashFiles(format('{0}/pubspec.lock', inputs.app-dir)) }}
+      - name: Build web
+        run: mise run build:web
+
+  build-ios:
+    name: Build iOS
+    needs: check
+    if: ${{ inputs.ios }}
+    runs-on: ${{ inputs.macos-runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read # clone the repository
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
+      # Only Flutter is needed.
+      MISE_ENABLE_TOOLS: flutter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          # The macOS toolchain would be another large cache entry; iOS builds
+          # are optional and rare.
+          cache: false
+      - name: Build iOS without code signing
+        run: mise run build:ios

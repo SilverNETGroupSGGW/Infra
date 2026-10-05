@@ -1,0 +1,116 @@
+{
+ "name": "androidpublisher",
+ "revision": "20261001",
+ "schemas": {
+  "CountryTargeting": {
+   "description": "Country targeting specification.",
+   "id": "CountryTargeting",
+   "properties": {
+    "countries": {
+     "description": "Countries to target, specified as two letter [CLDR codes](https://unicode.org/cldr/charts/latest/supplemental/territory_containment_un_m_49.html).",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "includeRestOfWorld": {
+     "description": "Include \"rest of world\" as well as explicitly targeted countries.",
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  },
+  "LocalizedText": {
+   "description": "Localized text in given language.",
+   "id": "LocalizedText",
+   "properties": {
+    "language": {
+     "description": "Language localization code (a BCP-47 language tag; for example, \"de-AT\" for Austrian German).",
+     "type": "string"
+    },
+    "text": {
+     "description": "The text in the given language.",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "Track": {
+   "description": "A track configuration. The resource for TracksService.",
+   "id": "Track",
+   "properties": {
+    "releases": {
+     "description": "In a read request, represents all active releases in the track. In an update request, represents desired changes.",
+     "items": {
+      "$ref": "TrackRelease"
+     },
+     "type": "array"
+    },
+    "track": {
+     "description": "Identifier of the track. Form factor tracks have a special prefix as an identifier, for example `wear:production`, `automotive:production`. [More on track name](https://developers.google.com/android-publisher/tracks#ff-track-name)",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "TrackRelease": {
+   "description": "A release within a track.",
+   "id": "TrackRelease",
+   "properties": {
+    "countryTargeting": {
+     "$ref": "CountryTargeting",
+     "description": "Restricts a release to a specific set of countries. Note this is only allowed to be set for inProgress releases in the production track."
+    },
+    "inAppUpdatePriority": {
+     "description": "In-app update priority of the release. All newly added APKs in the release will be considered at this priority. Can take values in the range [0, 5], with 5 the highest priority. Defaults to 0. in_app_update_priority can not be updated once the release is rolled out. See https://developer.android.com/guide/playcore/in-app-updates.",
+     "format": "int32",
+     "type": "integer"
+    },
+    "name": {
+     "description": "The release name. Not required to be unique. If not set, the name is generated from the APK's version_name. If the release contains multiple APKs, the name is generated from the date.",
+     "type": "string"
+    },
+    "releaseNotes": {
+     "description": "A description of what is new in this release.",
+     "items": {
+      "$ref": "LocalizedText"
+     },
+     "type": "array"
+    },
+    "status": {
+     "description": "The status of the release.",
+     "enum": [
+      "statusUnspecified",
+      "draft",
+      "inProgress",
+      "halted",
+      "completed"
+     ],
+     "enumDescriptions": [
+      "Unspecified status.",
+      "The release's APKs are not being served to users.",
+      "The release's APKs are being served to a fraction of users, determined by 'user_fraction'.",
+      "The release's APKs will no longer be served to users. Users who already have these APKs are unaffected.",
+      "The release will have no further changes. Its APKs are being served to all users, unless they are eligible to APKs of a more recent release."
+     ],
+     "type": "string"
+    },
+    "userFraction": {
+     "description": "Fraction of users who are eligible for a staged release. 0 < fraction < 1. Can only be set when status is \"inProgress\" or \"halted\".",
+     "format": "double",
+     "type": "number"
+    },
+    "versionCodes": {
+     "description": "Version codes of all APKs in the release. Must include version codes to retain from previous releases.",
+     "items": {
+      "format": "int64",
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "version": "v3"
+}
