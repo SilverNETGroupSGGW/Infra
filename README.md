@@ -328,8 +328,8 @@ To add an app, add its project to `apps` of `terraform/bootstrap` and
 apply that (it gives the Terraform service account its roles there), then add
 a module block to `terraform/apps/main.tf` and merge it to `main`. The
 [Terraform workflow](.github/workflows/terraform.yml) plans the change and,
-once a reviewer of the `terraform` environment has approved the plan job and
-then the apply job, applies it. Settings that already exist get
+once a reviewer of the `terraform` environment has read the plan in the run
+summary and approved the apply job, applies it. Settings that already exist get
 an `import` block, as the ones set by hand before.
 
 Pass `environment: release` to `flutter-release.yml` when the app has the
@@ -341,9 +341,10 @@ and leave `environment` out of the workflow.
 #### Terraform in CI
 
 The workflow signs in to Google Cloud as the Terraform service account
-(Workload Identity Federation, only from `main` in the `terraform`
-environment) and to GitHub as the organization's Terraform GitHub App, and
-keeps the state in HCP Terraform's free tier. No Google Cloud billing account
+(Workload Identity Federation, only `terraform.yml` from `main`) and to GitHub
+as the organization's Terraform GitHub App, and keeps the state in HCP
+Terraform's free tier. Its plan job runs without an approval; the apply job
+waits for a reviewer of the `terraform` environment. No Google Cloud billing account
 is linked to anything, so nothing can be billed. An administrator sets this up
 once:
 
@@ -358,8 +359,8 @@ once:
    accounts. It creates the `apps` workspace in HCP Terraform, the
    `silvernet-infra` project with the Terraform service account and its
    sign-in, its rights on the apps' projects (and their display names), the
-   Play Console admin permission, and the `terraform` environment with its
-   variables:
+   Play Console admin permission, the `terraform` environment and the
+   workflow's repository variables:
 
    ```sh
    gcloud auth application-default login --scopes=openid,\
@@ -374,8 +375,8 @@ once:
    terraform apply -var github_app_id=APP_ID \
      -var github_app_installation_id=INSTALLATION_ID
    gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
-     --env terraform < private-key.pem
-   gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra --env terraform
+     < private-key.pem
+   gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra
    ```
 
    If the Play Console call fails because the API is not enabled, run

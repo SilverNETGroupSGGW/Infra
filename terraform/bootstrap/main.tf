@@ -206,10 +206,10 @@ resource "google_iam_workload_identity_pool_provider" "terraform" {
     "google.subject"          = "assertion.sub"
     "attribute.repository_id" = "assertion.repository_id"
   }
-  # Only terraform.yml from main, in the approved `terraform` environment.
+  # Only terraform.yml from main: its plan job, and its apply job once
+  # approved in the `terraform` environment.
   attribute_condition = join(" && ", [
     "assertion.repository_id == '${local.repository_id}'",
-    "assertion.environment == '${local.environment}'",
     "assertion.ref == 'refs/heads/main'",
     "assertion.workflow_ref == 'SilverNETGroupSGGW/Infra/.github/workflows/terraform.yml@refs/heads/main'",
   ])
@@ -271,7 +271,8 @@ resource "github_repository_environment_deployment_policy" "terraform_main" {
   branch_pattern = "main"
 }
 
-resource "github_actions_environment_variable" "terraform" {
+# Repository variables, so that the plan job reads them without an approval.
+resource "github_actions_variable" "terraform" {
   for_each = {
     TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.terraform.name
     TF_GOOGLE_SERVICE_ACCOUNT            = google_service_account.terraform.email
@@ -282,7 +283,6 @@ resource "github_actions_environment_variable" "terraform" {
   }
 
   repository    = data.github_repository.infra.name
-  environment   = github_repository_environment.terraform.environment
   variable_name = each.key
   value         = each.value
 }

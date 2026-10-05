@@ -1,10 +1,10 @@
 name: Terraform
 
-# Applies terraform/apps (the apps' store release setup) from main. Both jobs
-# run in the `terraform` environment, whose reviewers approve the plan job and,
-# after reading its plan in the run summary, the apply job. Only this workflow
-# on main in that environment can sign in as the Terraform service account
-# (terraform/bootstrap). HCP Terraform keeps the state.
+# Applies terraform/apps (the apps' store release setup) from main. The plan
+# job runs on its own and writes the plan to the run summary; the apply job
+# runs in the `terraform` environment, whose reviewers approve it after reading
+# the plan. Only this workflow on main can sign in as the Terraform service
+# account (terraform/bootstrap). HCP Terraform keeps the state.
 
 on:
   push:
@@ -29,7 +29,6 @@ jobs:
     name: Plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: terraform
     permissions:
       contents: read # clone the repository
       id-token: write # sign in to Google Cloud (Workload Identity Federation)
