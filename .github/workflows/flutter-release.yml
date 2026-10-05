@@ -388,7 +388,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          path: .flutter-workflows
+          path: .infra
           persist-credentials: false
           sparse-checkout: scripts
       # From the release rather than the run's artifacts, so that the job can
@@ -420,7 +420,7 @@ jobs:
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION_CODE: ${{ needs.plan.outputs.build-number }}
           NOTES_LANGUAGE: ${{ inputs.play-notes-language }}
-        run: python3 .flutter-workflows/scripts/google_play.py
+        run: python3 .infra/scripts/google_play.py
 
   ios-archive:
     name: iOS archive
@@ -625,7 +625,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
-          path: .flutter-workflows
+          path: .infra
           persist-credentials: false
           sparse-checkout: scripts
       - name: Finish the upload
@@ -646,7 +646,7 @@ jobs:
           export KEY_PATH
           trap 'rm -f "$KEY_PATH"' EXIT
           printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$KEY_PATH"
-          python3 .flutter-workflows/scripts/app_store_submit.py
+          python3 .infra/scripts/app_store_submit.py
 
   pages:
     name: GitHub Pages

@@ -11,4 +11,4 @@ __pycache__/
 
 # Terraform working files; the module's callers keep their own lock files
 .terraform/
-terraform/**/.terraform.lock.hcl
+terraform/app-release/.terraform.lock.hcl

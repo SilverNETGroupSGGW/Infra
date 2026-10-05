@@ -1,8 +1,13 @@
-# flutter-workflows
+# Infra
 
-Reusable GitHub Actions workflows for the Flutter apps of SilverNETGroupSGGW:
-continuous integration, releases to GitHub, Google Play, App Store Connect and
-GitHub Pages.
+Infrastructure of SilverNETGroupSGGW:
+
+- reusable GitHub Actions workflows for the Flutter apps: continuous
+  integration, releases to GitHub, Google Play, App Store Connect and GitHub
+  Pages (this README);
+- the Terraform setup of the apps' store releases ([Store setup](#store-setup));
+- the Docker Compose services on the club's server
+  ([docs/deploy.md](docs/deploy.md)).
 
 | Workflow | What it does |
 | --- | --- |
@@ -20,7 +25,7 @@ Reference the workflows by commit SHA, with the version in a comment, and let
 Renovate update the SHA (`config:recommended` does):
 
 ```yaml
-uses: SilverNETGroupSGGW/flutter-workflows/.github/workflows/flutter-ci.yml@<commit-sha> # v1.0.0
+uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-ci.yml@<commit-sha> # v1.0.0
 ```
 
 Tags follow semantic versioning. A major version changes inputs, secrets,
@@ -52,7 +57,7 @@ jobs:
     if: ${{ github.event.repository.visibility == 'public' }}
     permissions:
       contents: read # clone the repository
-    uses: SilverNETGroupSGGW/flutter-workflows/.github/workflows/flutter-ci.yml@<commit-sha> # v1.0.0
+    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-ci.yml@<commit-sha> # v1.0.0
     with:
       app-dir: app # the directory with pubspec.yaml; default "."
       codegen: true # if the app commits generated code
@@ -104,7 +109,7 @@ jobs:
       contents: write # attach the builds to the release
       id-token: write # Google Play (Workload Identity Federation) and Pages
       pages: write # publish the web app
-    uses: SilverNETGroupSGGW/flutter-workflows/.github/workflows/flutter-release.yml@<commit-sha> # v1.0.0
+    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-release.yml@<commit-sha> # v1.0.0
     with:
       app-dir: app
       android-package: com.example.myapp # turns on Google Play
@@ -223,7 +228,7 @@ jobs:
       contents: read # read the releases and their web builds
       pages: write # publish the site
       id-token: write # authenticate the Pages deployment (OIDC)
-    uses: SilverNETGroupSGGW/flutter-workflows/.github/workflows/flutter-pages.yml@<commit-sha> # v1.0.0
+    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-pages.yml@<commit-sha> # v1.0.0
 ```
 
 Enable Pages with "Source: GitHub Actions". Release runs deploy from their
@@ -337,7 +342,7 @@ provider "googleplay" {
 }
 
 module "release" {
-  source = "github.com/SilverNETGroupSGGW/flutter-workflows//terraform/app-release?ref=<commit-sha>"
+  source = "github.com/SilverNETGroupSGGW/Infra//terraform/app-release?ref=<commit-sha>"
 
   repository          = "my-app"
   android_package     = "com.example.myapp"

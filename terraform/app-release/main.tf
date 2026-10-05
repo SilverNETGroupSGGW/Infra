@@ -11,7 +11,7 @@ data "github_repository" "app" {
 locals {
   # Numeric IDs survive renames of the repository and its owner.
   repository_id    = tostring(data.github_repository.app.repo_id)
-  release_workflow = "SilverNETGroupSGGW/flutter-workflows/.github/workflows/flutter-release.yml@"
+  release_workflow = "SilverNETGroupSGGW/Infra/.github/workflows/flutter-release.yml@"
 }
 
 resource "google_project" "release" {
