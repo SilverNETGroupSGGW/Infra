@@ -347,9 +347,9 @@ keeps the state in HCP Terraform's free tier. No Google Cloud billing account
 is linked to anything, so nothing can be billed. An administrator sets this up
 once:
 
-1. Create an HCP Terraform organization (free plan) named
-   `silvernetgroupsggw`, and a team API token for the workflow (Settings →
-   Teams → owners → Team API token).
+1. Have the club's HCP Terraform organization `KN-Silver` (free plan; the
+   bootstrap imports it) and a team API token for the workflow, stored as the
+   `TF_HCP_TOKEN` secret (Settings → Teams → owners → Team API token).
 2. Create the GitHub App in the organization's settings (Developer settings →
    GitHub Apps): no webhook, repository permissions Administration and
    Variables (read and write); install it on the app repositories only and

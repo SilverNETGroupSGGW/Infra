@@ -65,13 +65,7 @@ variable "infra_project_id" {
 variable "hcp_organization" {
   description = "HCP Terraform organization that keeps the state."
   type        = string
-  default     = "silvernetgroupsggw"
-}
-
-variable "hcp_email" {
-  description = "Contact e-mail of the HCP Terraform organization."
-  type        = string
-  default     = "silvernetsggw@gmail.com"
+  default     = "KN-Silver"
 }
 
 variable "github_app_id" {
@@ -111,9 +105,20 @@ locals {
   environment   = "terraform"
 }
 
+# The club's existing organization, adopted; its settings stay as they are.
+import {
+  to = tfe_organization.silver
+  id = var.hcp_organization
+}
+
 resource "tfe_organization" "silver" {
   name  = var.hcp_organization
-  email = var.hcp_email
+  email = "silvernetsggw@gmail.com"
+
+  lifecycle {
+    prevent_destroy = true
+    ignore_changes  = all
+  }
 }
 
 # The state of terraform/apps. Runs execute in the Terraform workflow, which
