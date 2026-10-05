@@ -64,7 +64,7 @@ class PlayMock:
                 self.puts.append(body)
                 return 200, body
         if request.method == "POST" and path == f"{EDITS}/e1:commit":
-            assert query["changesInReviewBehavior"] == "ERROR_IF_IN_REVIEW"
+            assert "changesInReviewBehavior" not in query
             assert request.raw == b""
             if self.manual_review and "changesNotSentForReview" not in query:
                 return 400, {"error": {"code": 400, "message":

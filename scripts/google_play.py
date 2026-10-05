@@ -74,14 +74,16 @@ def check_no_staged_rollout(edit, track):
 
 
 def commit(edit):
-    url = f"{API}/edits/{edit}:commit?changesInReviewBehavior=ERROR_IF_IN_REVIEW"
+    # Changes already in review (such as a policy declaration) are cancelled
+    # and sent again together with this release.
+    url = f"{API}/edits/{edit}:commit"
     try:
         call("POST", url)
     except ApiError as error:
         if "changesNotSentForReview to true" not in error.body:
             raise
         # The app needs its changes sent for review by hand in Play Console.
-        call("POST", url + "&changesNotSentForReview=true")
+        call("POST", url + "?changesNotSentForReview=true")
         print("::notice::Send the changes for review in Play Console.")
 
 
