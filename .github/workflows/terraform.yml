@@ -4,7 +4,7 @@ name: Terraform
 # run in the `terraform` environment, whose reviewers approve the plan job and,
 # after reading its plan in the run summary, the apply job. Only this workflow
 # on main in that environment can sign in as the Terraform service account
-# (terraform/bootstrap).
+# (terraform/bootstrap). HCP Terraform keeps the state.
 
 on:
   push:
@@ -63,9 +63,10 @@ jobs:
         name: Plan
         working-directory: terraform/apps
         env:
-          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_HCP_TOKEN }}
         run: |
-          terraform init -backend-config="bucket=$STATE_BUCKET"
+          terraform init
           status=0
           terraform plan -detailed-exitcode -out=tfplan || status=$?
           [ "$status" -ne 1 ] || exit 1
@@ -124,7 +125,8 @@ jobs:
       - name: Apply
         working-directory: terraform/apps
         env:
-          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
+          TF_TOKEN_app_terraform_io: ${{ secrets.TF_HCP_TOKEN }}
         run: |
-          terraform init -backend-config="bucket=$STATE_BUCKET"
+          terraform init
           terraform apply tfplan

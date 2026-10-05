@@ -314,16 +314,16 @@ Also:
 
 [`terraform/apps`](terraform/apps/main.tf) describes the store release setup
 of every app with the [`terraform/app-release`](terraform/app-release) module:
-keyless Google Play sign-in in the app's own Google Cloud project, the service
+keyless Google Play sign-in in the app's Google Cloud project (its Firebase
+project), the service
 account's release access to the app in Play Console, the app repository's
 release environment (required reviewers, release tags allowed) and the
 repository variables the workflow reads. Secrets stay out of Terraform; set
 them with `gh secret set`.
 
 To add an app, add its project to `app_projects` of `terraform/bootstrap` and
-apply that (service accounts can only create projects in a Google Cloud
-organization, which the club does not have yet), then add a module block to
-`terraform/apps/main.tf` and merge it to `main`. The
+apply that (it gives the Terraform service account its roles there), then add
+a module block to `terraform/apps/main.tf` and merge it to `main`. The
 [Terraform workflow](.github/workflows/terraform.yml) plans the change and,
 once a reviewer of the `terraform` environment has approved the plan job and
 then the apply job, applies it. Settings that already exist get
@@ -340,22 +340,23 @@ and leave `environment` out of the workflow.
 The workflow signs in to Google Cloud as the Terraform service account
 (Workload Identity Federation, only from `main` in the `terraform`
 environment) and to GitHub as the organization's Terraform GitHub App, and
-keeps the state in a Cloud Storage bucket. An administrator sets this up once:
+keeps the state in HCP Terraform's free tier. No Google Cloud billing account
+is linked to anything, so nothing can be billed. An administrator sets this up
+once:
 
-1. Have a Google Cloud billing account for the infra project (the state
-   bucket needs one; it stays in the always-free tier). A Google Cloud
-   organization (Cloud Identity Free on `silver.sggw.pl`) is optional for now;
-   the commented-out parts of `terraform/bootstrap` and `terraform/apps` show
-   what changes with it.
+1. Create an HCP Terraform organization (free plan) named
+   `silvernetgroupsggw`, and a team API token for the workflow (Settings →
+   Teams → owners → Team API token).
 2. Create the GitHub App in the organization's settings (Developer settings →
-   GitHub Apps): no webhook, repository permissions Administration,
-   Environments, Secrets and Variables (read and write) and Metadata (read).
-   Install it on the app repositories and generate a private key.
+   GitHub Apps): no webhook, repository permissions Administration and
+   Variables (read and write); install it on the app repositories only and
+   generate a private key.
 3. Apply [`terraform/bootstrap`](terraform/bootstrap/main.tf) with your own
-   accounts. It creates the `silvernet-infra` project with the state bucket,
-   the apps' projects, the Terraform service account and its sign-in, its
-   rights on those projects and the Play Console admin permission, and the
-   `terraform` environment with its variables:
+   accounts. It creates the `apps` workspace in HCP Terraform, the
+   `silvernet-infra` project with the Terraform service account and its
+   sign-in, its rights on the apps' projects (and their display names), the
+   Play Console admin permission, and the `terraform` environment with its
+   variables:
 
    ```sh
    gcloud auth application-default login --scopes=openid,\
@@ -364,18 +365,24 @@ keeps the state in a Cloud Storage bucket. An administrator sets this up once:
    https://www.googleapis.com/auth/androidpublisher
    export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json
    export GITHUB_TOKEN=$(gh auth token)
+   terraform login
    cd terraform/bootstrap
    terraform init
-   terraform apply -var billing_account=BILLING_ACCOUNT \
-     -var github_app_id=APP_ID -var github_app_installation_id=INSTALLATION_ID
+   terraform apply -var github_app_id=APP_ID \
+     -var github_app_installation_id=INSTALLATION_ID
    gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
      --env terraform < private-key.pem
+   gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra --env terraform
    ```
 
    If the Play Console call fails because the API is not enabled, run
    `gcloud auth application-default set-quota-project silvernet-infra` and
    apply again. Keep the bootstrap state (`terraform.tfstate`) private.
 4. Run the Terraform workflow (Actions → Terraform → Run workflow).
+
+A Google Cloud organization (Cloud Identity Free on `silver.sggw.pl`) is
+optional; the commented-out parts of `terraform/bootstrap` and
+`terraform/apps` show what changes with it.
 
 ### Google Play
 

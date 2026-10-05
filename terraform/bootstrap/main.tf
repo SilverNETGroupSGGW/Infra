@@ -1,10 +1,12 @@
 # One-time setup that lets the Terraform workflow manage the apps
-# (terraform/apps): the infra project with the state bucket, the apps' release
-# projects, the Terraform service account and its keyless sign-in from this
-# repository's `terraform` environment, its rights on those projects and in
-# Play Console, and the `terraform` environment. An administrator of the Google Cloud organization,
-# Play Console and this repository applies it once from their machine; see
-# README.md, "Terraform in CI".
+# (terraform/apps): the HCP Terraform workspace that keeps their state, the
+# infra project with the Terraform service account and its keyless sign-in from
+# this repository's `terraform` environment, its rights on the apps' projects
+# and in Play Console, and the `terraform` environment. An administrator of
+# HCP Terraform, the Google Cloud projects, Play Console and this repository
+# applies it once from their machine; see README.md, "Terraform in CI".
+#
+# Nothing here links a Google Cloud billing account, so nothing can be billed.
 
 terraform {
   required_version = ">= 1.11"
@@ -22,38 +24,44 @@ terraform {
       source  = "oliver-binns/googleplay"
       version = "~> 0.6.3"
     }
+    tfe = {
+      source  = "hashicorp/tfe"
+      version = "~> 0.81"
+    }
   }
 }
 
-# Without a Google Cloud organization (silver.sggw.pl, later), the projects
-# have no parent and are created here by a person, as service accounts can
-# only create projects in an organization. With one, uncomment org_id and the
-# apps folder, and let terraform/apps create the projects instead.
+# Each app's Firebase project is its Google Cloud project; the release sign-in
+# lives there next to the app's other parts. Project IDs cannot change, only
+# the display names.
+variable "app_projects" {
+  description = "Google Cloud projects of the apps in terraform/apps: project ID => display name."
+  type        = map(string)
+  default = {
+    "silvertimetable-bea41" = "Plan WZIM"
+    "sggw-days"             = "Dni SGGW"
+    "kampus-sggw-2021"      = "Kampus SGGW"
+  }
+}
+
+# With a Google Cloud organization (silver.sggw.pl, later), new apps' projects
+# can be created by terraform/apps in an `apps` folder:
 #
 # variable "org_id" {
 #   description = "Numeric ID of the Google Cloud organization (gcloud organizations list)."
 #   type        = string
 # }
 
-variable "app_projects" {
-  description = "Google Cloud projects of the apps in terraform/apps: project ID => display name."
-  type        = map(string)
-  default = {
-    "plan-wzim"   = "Plan WZIM"
-    "dni-sggw"    = "Dni SGGW"
-    "kampus-sggw" = "Kampus SGGW"
-  }
-}
-
-variable "billing_account" {
-  description = "Billing account of the infra project, which holds the state bucket (gcloud billing accounts list)."
-  type        = string
-}
-
 variable "infra_project_id" {
-  description = "ID of the project that holds the state bucket and the Terraform service account."
+  description = "ID of the project that holds the Terraform service account."
   type        = string
   default     = "silvernet-infra"
+}
+
+variable "hcp_organization" {
+  description = "HCP Terraform organization that keeps the state."
+  type        = string
+  default     = "silvernetgroupsggw"
 }
 
 variable "github_app_id" {
@@ -82,6 +90,10 @@ provider "googleplay" {
   developer_id = "8827645756827128332" # KN Silver .NET
 }
 
+provider "tfe" {
+  organization = var.hcp_organization
+}
+
 data "github_repository" "infra" {
   name = "Infra"
 }
@@ -91,24 +103,48 @@ locals {
   environment   = "terraform"
 }
 
+# The state of terraform/apps. Runs execute in the Terraform workflow, which
+# signs in to Google Cloud itself; HCP Terraform only keeps the state.
+resource "tfe_workspace" "apps" {
+  name        = "apps"
+  description = "terraform/apps of SilverNETGroupSGGW/Infra"
+}
+
+resource "tfe_workspace_settings" "apps" {
+  workspace_id   = tfe_workspace.apps.id
+  execution_mode = "local"
+}
+
 # resource "google_folder" "apps" {
 #   display_name = "apps"
 #   parent       = "organizations/${var.org_id}"
 # }
 
 resource "google_project" "infra" {
-  project_id      = var.infra_project_id
-  name            = "SilverNET infra"
-  billing_account = var.billing_account
-  # org_id        = var.org_id
+  project_id = var.infra_project_id
+  name       = "SilverNET infra"
+  # org_id   = var.org_id
+}
+
+# The apps' existing projects, adopted for their display names. Terraform never
+# changes their billing or parent, and refuses to delete them.
+import {
+  for_each = var.app_projects
+  to       = google_project.apps[each.key]
+  id       = each.key
 }
 
 resource "google_project" "apps" {
   for_each = var.app_projects
 
-  project_id = each.key
-  name       = each.value
-  # folder_id  = google_folder.apps.folder_id
+  project_id          = each.key
+  name                = each.value
+  deletion_policy     = "PREVENT"
+  auto_create_network = true
+
+  lifecycle {
+    ignore_changes = [billing_account, org_id, folder_id, labels, auto_create_network]
+  }
 }
 
 resource "google_project_service" "infra" {
@@ -118,28 +154,11 @@ resource "google_project_service" "infra" {
     "iam.googleapis.com",
     "iamcredentials.googleapis.com",
     "serviceusage.googleapis.com",
-    "storage.googleapis.com",
     "sts.googleapis.com",
   ])
 
   project = google_project.infra.project_id
   service = each.value
-}
-
-# Holds IDs and names only; secrets stay out of Terraform. us-central1 is in
-# Cloud Storage's always-free tier.
-resource "google_storage_bucket" "state" {
-  project                     = google_project.infra.project_id
-  name                        = "${var.infra_project_id}-terraform-state"
-  location                    = "US-CENTRAL1"
-  uniform_bucket_level_access = true
-  public_access_prevention    = "enforced"
-
-  versioning {
-    enabled = true
-  }
-
-  depends_on = [google_project_service.infra]
 }
 
 resource "google_service_account" "terraform" {
@@ -187,15 +206,9 @@ resource "google_service_account_iam_member" "terraform_github" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repository_id}"
 }
 
-resource "google_storage_bucket_iam_member" "terraform_state" {
-  bucket = google_storage_bucket.state.name
-  role   = "roles/storage.objectAdmin"
-  member = google_service_account.terraform.member
-}
-
 # What terraform/app-release creates in each app's project. With the
 # organization, the same roles plus roles/resourcemanager.projectCreator go on
-# the apps folder instead.
+# the apps folder for new apps.
 resource "google_project_iam_member" "terraform" {
   for_each = {
     for pair in setproduct(keys(var.app_projects), [
@@ -241,8 +254,8 @@ resource "github_actions_environment_variable" "terraform" {
   for_each = {
     TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.terraform.name
     TF_GOOGLE_SERVICE_ACCOUNT            = google_service_account.terraform.email
-    TF_STATE_BUCKET                      = google_storage_bucket.state.name
-    # TF_APPS_FOLDER_ID              = google_folder.apps.folder_id
+    TF_CLOUD_ORGANIZATION                = var.hcp_organization
+    # TF_APPS_FOLDER_ID                  = google_folder.apps.folder_id
     TF_GITHUB_APP_ID              = var.github_app_id
     TF_GITHUB_APP_INSTALLATION_ID = var.github_app_installation_id
   }

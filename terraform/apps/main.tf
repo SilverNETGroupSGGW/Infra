@@ -1,14 +1,18 @@
 # Store release setup of the organization's apps (terraform/app-release),
 # applied by the Terraform workflow after a reviewer approves it. A new app is
-# a new module block here and, until there is a Google Cloud organization, its
-# project in terraform/bootstrap. Secrets are set with `gh secret set`.
+# a new module block here and its project in `app_projects` of
+# terraform/bootstrap. Secrets are set with `gh secret set`.
 
 terraform {
   required_version = ">= 1.11"
 
-  # The bucket comes from `-backend-config=bucket=...` (TF_STATE_BUCKET).
-  backend "gcs" {
-    prefix = "apps"
+  # HCP Terraform keeps the state; the organization comes from
+  # TF_CLOUD_ORGANIZATION and the token from TF_TOKEN_app_terraform_io. Runs
+  # execute locally (in the Terraform workflow).
+  cloud {
+    workspaces {
+      name = "apps"
+    }
   }
 
   required_providers {
@@ -27,10 +31,10 @@ terraform {
   }
 }
 
-# The apps' projects come from terraform/bootstrap while there is no Google
-# Cloud organization (silver.sggw.pl, later). With one, uncomment this and the
-# google_folder_id lines, drop create_google_project, and the modules create
-# the projects in the apps folder.
+# Each app uses its Firebase project. With a Google Cloud organization
+# (silver.sggw.pl, later), a new app without one can get its project from the
+# module in the apps folder: uncomment this, set google_folder_id and drop
+# create_google_project.
 #
 # variable "apps_folder_id" {
 #   description = "Google Cloud folder of the apps' projects (TF_APPS_FOLDER_ID of the terraform environment)."
@@ -79,8 +83,8 @@ module "plan_wzim" {
 
   repository            = "SilverTimetable2"
   android_package       = "com.silvernet.silvertimetable"
-  google_project_id     = "plan-wzim"
-  create_google_project = false # from terraform/bootstrap
+  google_project_id     = "silvertimetable-bea41"
+  create_google_project = false # the app's Firebase project
   # google_folder_id    = var.apps_folder_id
   # GitHub Free has no environments in private repositories; "release" once
   # the repository is public.
@@ -102,8 +106,8 @@ module "dni_sggw" {
 
   repository            = "sggw_days"
   android_package       = "com.silvernet.sggw_days"
-  google_project_id     = "dni-sggw"
-  create_google_project = false # from terraform/bootstrap
+  google_project_id     = "sggw-days"
+  create_google_project = false # the app's Firebase project
   # google_folder_id    = var.apps_folder_id
   environment = null
 
@@ -118,8 +122,8 @@ module "kampus_sggw" {
 
   repository            = "kampus_sggw"
   android_package       = "com.silvers.kampus_sggw_remake"
-  google_project_id     = "kampus-sggw"
-  create_google_project = false # from terraform/bootstrap
+  google_project_id     = "kampus-sggw-2021"
+  create_google_project = false # the app's Firebase project
   # google_folder_id    = var.apps_folder_id
   environment = null
 
