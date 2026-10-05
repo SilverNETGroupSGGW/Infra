@@ -1,9 +1,11 @@
 name: Terraform
 
 # Applies terraform/apps (the apps' store release setup) from main. The plan
-# job runs on its own and writes the plan to the run summary; the apply job
-# runs in the `terraform` environment, whose reviewers approve it after reading
-# the plan. Only this workflow on main can sign in as the Terraform service
+# job runs on its own and lists the changing resources in the run summary; the
+# apply job runs in the `terraform` environment, whose reviewers approve it
+# after reading that list. The repository is public, so attribute values stay
+# out of the logs and the summary, and the saved plan travels encrypted
+# (TF_PLAN_PASSPHRASE). Only this workflow on main can sign in as the Terraform service
 # account (terraform/bootstrap). HCP Terraform keeps the state.
 
 on:
@@ -56,7 +58,7 @@ jobs:
         run: |
           umask 077
           file="$RUNNER_TEMP/github-app.pem"
-          printf '%s\n' "${KEY:?Set the TF_GITHUB_APP_PRIVATE_KEY secret of the terraform environment}" > "$file"
+          printf '%s\n' "${KEY:?Set the TF_GITHUB_APP_PRIVATE_KEY repository secret}" > "$file"
           echo "TF_VAR_github_app_private_key_file=$file" >> "$GITHUB_ENV"
       - id: plan
         name: Plan
@@ -67,20 +69,38 @@ jobs:
         run: |
           terraform init
           status=0
-          terraform plan -detailed-exitcode -out=tfplan || status=$?
+          # Errors still reach the log; the plan itself only the summary below.
+          terraform plan -detailed-exitcode -no-color -out=tfplan > /dev/null || status=$?
           [ "$status" -ne 1 ] || exit 1
           echo "changes=$([ "$status" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
           {
-            echo '```'
-            terraform show -no-color tfplan
-            echo '```'
+            echo '| Action | Resource |'
+            echo '| --- | --- |'
+            terraform show -json tfplan | jq -r '
+              .resource_changes[]
+              | (.change.actions | join(", ")) as $actions
+              | select($actions != "no-op" or .change.importing)
+              | "| \(if .change.importing then "import" + (if $actions == "no-op" then "" else ", " + $actions end) else $actions end) | `\(.address)` |"'
+            echo
+            terraform show -no-color tfplan | grep -E '^(Plan|No changes)' || true
           } >> "$GITHUB_STEP_SUMMARY"
+      - if: ${{ steps.plan.outputs.changes == 'true' }}
+        name: Encrypt the plan
+        working-directory: terraform/apps
+        env:
+          PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+        run: |
+          printf '%s' "${PASSPHRASE:?Set the TF_PLAN_PASSPHRASE repository secret}" |
+            gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+              --symmetric --cipher-algo AES256 --output tfplan.gpg tfplan
+          rm tfplan
       - if: ${{ steps.plan.outputs.changes == 'true' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tfplan
-          path: terraform/apps/tfplan
-          retention-days: 1
+          path: terraform/apps/tfplan.gpg
+          # Encrypted, so it can wait for the approval.
+          retention-days: 7
           if-no-files-found: error
 
   apply:
@@ -121,6 +141,14 @@ jobs:
         with:
           name: tfplan
           path: terraform/apps
+      - name: Decrypt the plan
+        working-directory: terraform/apps
+        env:
+          PASSPHRASE: ${{ secrets.TF_PLAN_PASSPHRASE }}
+        run: |
+          printf '%s' "$PASSPHRASE" |
+            gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 0 \
+              --decrypt --output tfplan tfplan.gpg
       - name: Apply
         working-directory: terraform/apps
         env:
@@ -128,4 +156,5 @@ jobs:
           TF_TOKEN_app_terraform_io: ${{ secrets.TF_HCP_TOKEN }}
         run: |
           terraform init
-          terraform apply tfplan
+          # Only the result reaches the log; errors still do.
+          terraform apply -no-color tfplan | grep -E '^Apply complete!'

@@ -344,7 +344,9 @@ The workflow signs in to Google Cloud as the Terraform service account
 (Workload Identity Federation, only `terraform.yml` from `main`) and to GitHub
 as the organization's Terraform GitHub App, and keeps the state in HCP
 Terraform's free tier. Its plan job runs without an approval; the apply job
-waits for a reviewer of the `terraform` environment. No Google Cloud billing account
+waits for a reviewer of the `terraform` environment. The repository is public,
+so the run summary lists only the changing resources, the logs show no plan
+or apply values, and the saved plan is encrypted between the two jobs. No Google Cloud billing account
 is linked to anything, so nothing can be billed. An administrator sets this up
 once:
 
@@ -377,6 +379,9 @@ once:
    gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
      < private-key.pem
    gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra
+   # Encrypts the saved plan between the plan and apply jobs.
+   openssl rand -base64 32 | gh secret set TF_PLAN_PASSPHRASE \
+     --repo SilverNETGroupSGGW/Infra
    ```
 
    If the Play Console call fails because the API is not enabled, run
