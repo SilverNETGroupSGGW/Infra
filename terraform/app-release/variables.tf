@@ -3,11 +3,6 @@ variable "repository" {
   type        = string
 }
 
-variable "android_package" {
-  description = "Android application ID of the app in Play Console."
-  type        = string
-}
-
 variable "google_project_id" {
   description = "ID of the app's Google Cloud project, which holds its Google Play release sign-in."
   type        = string

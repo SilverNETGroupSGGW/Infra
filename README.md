@@ -355,10 +355,10 @@ Also:
 [`terraform/apps`](terraform/apps/main.tf) describes the store release setup
 of every app with the [`terraform/app-release`](terraform/app-release) module:
 keyless Google Play sign-in in the app's Google Cloud project (its Firebase
-project), the service account's release access to the app in Play Console,
-the app repository's release environment (required reviewers, release tags
-allowed) and the repository variables the workflow reads. Secrets stay out of
-Terraform; set them with `gh secret set`.
+project), the app repository's release environment (required reviewers,
+release tags allowed) and the repository variables the workflow reads. Secrets
+stay out of Terraform; set them with `gh secret set`. Play Console access is
+granted by hand (see Google Play below).
 [`terraform/apps/firebase.tf`](terraform/apps/firebase.tf) also tracks the
 apps' Firebase projects, apps, Firestore databases, buckets and Hosting sites;
 their deployments (rules, Hosting releases, Functions) stay with the apps'
@@ -433,9 +433,10 @@ optional; the commented-out parts of `terraform/bootstrap` and
 
 The App Bundle is signed with the app's upload key (the `ANDROID_*` secrets).
 The workflow signs in with Workload Identity Federation, set up by
-`terraform/apps` together with the service account's Play Console access
-("Release to testing tracks" and "Release to production, exclude devices, and
-use Play App Signing" for this app only). Store the upload key as secrets of
+`terraform/apps`. Invite its `releases@<project>.iam.gserviceaccount.com`
+service account in Play Console (Users and permissions) with "Release to
+testing tracks" and "Release to production, exclude devices, and use Play App
+Signing" for this app only. Store the upload key as secrets of
 the release environment (without `--env release` while the app has no
 environment):
 
