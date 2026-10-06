@@ -132,6 +132,7 @@ workflow only gets what it uses.
 | `android-package` | | Android application ID; turns on Google Play |
 | `android-keystore-path` | `android/app/key.jks` | Where the build reads the upload keystore, relative to `app-dir` |
 | `bundle-id`, `apple-app-id` | | iOS bundle ID and the app's numeric Apple ID (App Store Connect, App Information); `bundle-id` turns on the iOS build and App Store Connect |
+| `play-beta-track` | `beta` | API name of the open testing track; an app with a closed testing track named Beta from before open testing keeps it as `beta`, so its open testing track has another name, such as `openBeta` |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |
 | `pages` | `false` | Deploy the web builds to GitHub Pages once Pages is enabled for the repository |
 | `environment` | | Environment of the jobs that use signing or store credentials, e.g. one with required reviewers |

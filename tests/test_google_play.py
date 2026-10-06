@@ -92,6 +92,7 @@ class GooglePlayTest(unittest.TestCase):
             "PACKAGE_NAME": PACKAGE,
             "BUNDLE_PATH": str(self.bundle),
             "VERSION_CODE": "4030001",
+            "BETA_TRACK": "beta",
             "NOTES_LANGUAGE": "pl-PL",
             "GITHUB_REPOSITORY": "owner/repo",
             "FAKE_NOTES": "",
@@ -116,6 +117,24 @@ class GooglePlayTest(unittest.TestCase):
             "releaseNotes": [{"language": "pl-PL", "text": "Nowości"}],
         }]}])
         self.assertEqual(api.calls()[-1], f"POST {EDITS}/e1:commit")
+
+    def test_beta_track_with_another_name(self):
+        mock = PlayMock()
+        result, _ = self.run_play(
+            mock, MODE="build", CHANNEL="beta", BETA_TRACK="openBeta", TAG="v4.3.0-beta.1"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([put["track"] for put in mock.puts], ["openBeta"])
+
+        mock = PlayMock(tracks={"openBeta": dict(BETA_TRACK, track="openBeta")})
+        result, _ = self.run_play(
+            mock, MODE="promote", CHANNEL="prod", BETA_TRACK="openBeta", TAG="v4.3.0-beta.1"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            mock.puts[0]["releases"][0]["releaseNotes"],
+            [{"language": "pl-PL", "text": "Beta notes"}],
+        )
 
     def test_production_upload_without_notes(self):
         mock = PlayMock()

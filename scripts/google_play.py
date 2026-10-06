@@ -1,15 +1,16 @@
 """Publishes a release to Google Play with the Play Developer API.
 
 Run by .github/workflows/flutter-release.yml. MODE=build uploads the App Bundle
-BUNDLE_PATH to the beta (open testing) track for CHANNEL=beta or to production
-for CHANNEL=prod; MODE=promote releases the version code that the beta uploaded
-to production without uploading again, also when a later beta has replaced it
-on the beta track.
+BUNDLE_PATH to the open testing track BETA_TRACK for CHANNEL=beta or to
+production for CHANNEL=prod; MODE=promote releases the version code that the
+beta uploaded to production without uploading again, also when a later beta has
+replaced it on the beta track.
 
 Environment: ACCESS_TOKEN (OAuth token with the androidpublisher scope),
-PACKAGE_NAME (the Android application ID), MODE, CHANNEL, TAG, VERSION_CODE,
-BUNDLE_PATH (for MODE=build), NOTES_LANGUAGE, and GH_TOKEN for reading the
-release notes from the GitHub release. Uses only the Python standard library.
+PACKAGE_NAME (the Android application ID), MODE, CHANNEL, BETA_TRACK, TAG,
+VERSION_CODE, BUNDLE_PATH (for MODE=build), NOTES_LANGUAGE, and GH_TOKEN for
+reading the release notes from the GitHub release. Uses only the Python
+standard library.
 """
 
 import hashlib
@@ -26,6 +27,7 @@ API = f"{ROOT}/androidpublisher/v3/applications/{PACKAGE}"
 UPLOAD_API = f"{ROOT}/upload/androidpublisher/v3/applications/{PACKAGE}"
 # Play shows at most 500 characters of release notes per language.
 NOTES_LIMIT = 500
+BETA_TRACK = os.environ["BETA_TRACK"]
 
 
 class ApiError(Exception):
@@ -126,12 +128,12 @@ def main():
     edit = call("POST", f"{API}/edits", body={})["id"]
 
     if mode == "build":
-        track = "beta" if os.environ["CHANNEL"] == "beta" else "production"
+        track = BETA_TRACK if os.environ["CHANNEL"] == "beta" else "production"
         upload(edit, version_code)
         release = {"name": tag, "versionCodes": [version_code], "status": "completed"}
     elif mode == "promote":
         track = "production"
-        beta = call("GET", f"{API}/edits/{edit}/tracks/beta")
+        beta = call("GET", f"{API}/edits/{edit}/tracks/{BETA_TRACK}")
         matching = [
             release for release in beta.get("releases", [])
             if version_code in release.get("versionCodes", [])
