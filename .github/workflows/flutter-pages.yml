@@ -1,7 +1,7 @@
 name: Flutter web on GitHub Pages
 
-# Reusable: serves the newest release at the site root, the newest public beta
-# under /beta/. Release runs deploy from their tag: allow the tag rule "*".
+# Reusable: serves the newest release at the site root, the newest build of
+# any kind under /beta/. Release runs deploy from their tag: allow the tag rule "*".
 
 on:
   workflow_call:
@@ -28,11 +28,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: |
-          # Releases and public betas (labels beta, rc) with a web build, newest
-          # first, as "<tag> <prerelease>".
+          # Releases and pre-releases with a web build, newest first, as
+          # "<tag> <prerelease>".
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[]
             | select((.draft | not) and any(.assets[]; .name | endswith("-web.zip")))
-            | select((.prerelease | not) or (.tag_name | test("-(beta|rc)[.-]?[1-9][0-9]?$"; "i")))
             | "\(.tag_name) \(.prerelease)"' > releases.txt
           beta=$(awk 'NR == 1 { print $1 }' releases.txt)
           prod=$(awk '$2 == "false" { print $1; exit }' releases.txt)
