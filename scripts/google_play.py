@@ -1,13 +1,13 @@
 """Publishes a release to Google Play with the Play Developer API.
 
 Run by .github/workflows/flutter-release.yml. MODE=build uploads the App Bundle
-BUNDLE_PATH to the open testing track BETA_TRACK for CHANNEL=beta or to
-production for CHANNEL=prod; MODE=promote releases the version code that the
-beta uploaded to production without uploading again, also when a later beta has
-replaced it on the beta track.
+BUNDLE_PATH and releases it on the track TRACK; MODE=promote releases a version
+code that an earlier run uploaded on TRACK without uploading again, also when a
+later beta has replaced it on the open testing track BETA_TRACK. A release on
+production is named after the version without its pre-release label.
 
 Environment: ACCESS_TOKEN (OAuth token with the androidpublisher scope),
-PACKAGE_NAME (the Android application ID), MODE, CHANNEL, BETA_TRACK, TAG,
+PACKAGE_NAME (the Android application ID), MODE, TRACK, BETA_TRACK, TAG,
 VERSION_CODE, BUNDLE_PATH (for MODE=build), NOTES_LANGUAGE, and GH_TOKEN for
 reading the release notes from the GitHub release. Uses only the Python
 standard library.
@@ -27,6 +27,7 @@ API = f"{ROOT}/androidpublisher/v3/applications/{PACKAGE}"
 UPLOAD_API = f"{ROOT}/upload/androidpublisher/v3/applications/{PACKAGE}"
 # Play shows at most 500 characters of release notes per language.
 NOTES_LIMIT = 500
+TRACK = os.environ["TRACK"]
 BETA_TRACK = os.environ["BETA_TRACK"]
 
 
@@ -127,12 +128,11 @@ def main():
     notes = release_notes(tag)
     edit = call("POST", f"{API}/edits", body={})["id"]
 
+    track = TRACK
     if mode == "build":
-        track = BETA_TRACK if os.environ["CHANNEL"] == "beta" else "production"
         upload(edit, version_code)
         release = {"name": tag, "versionCodes": [version_code], "status": "completed"}
     elif mode == "promote":
-        track = "production"
         beta = call("GET", f"{API}/edits/{edit}/tracks/{BETA_TRACK}")
         matching = [
             release for release in beta.get("releases", [])
@@ -142,11 +142,11 @@ def main():
         # stays in Play and can still be released.
         if not matching and version_code not in uploaded_bundles(edit):
             sys.exit(
-                f"Version code {version_code} is not in Google Play: only a beta "
-                "that the release workflow uploaded can be promoted."
+                f"Version code {version_code} is not in Google Play: only a build "
+                "that the release workflow uploaded can be published again."
             )
         release = {
-            "name": tag.split("-")[0],
+            "name": tag.split("-")[0] if track == "production" else tag,
             "versionCodes": [version_code],
             "status": "completed",
         }

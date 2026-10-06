@@ -80,13 +80,27 @@ The jobs are called `Lint and test`, `Build Android`, `Build web` and
 
 ```yaml
 name: Release
-run-name: Release ${{ github.event.release.tag_name }} (${{ github.event.action }})
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('Publish {0} to {1} ({2})', github.ref_name, inputs.track, inputs.platforms)
+  || format('Release {0} ({1})', github.ref_name, github.event.action) }}
 
 on:
   release:
     # published: build a release or pre-release; released: also promote a beta
     # that was turned into a release.
     types: [published, released]
+  # Publishes a release's store builds again without building; run it from the
+  # release's tag.
+  workflow_dispatch:
+    inputs:
+      track:
+        description: Google Play track (iOS has production and the open testing track)
+        type: choice
+        options: [beta, production, alpha, internal]
+      platforms:
+        type: choice
+        options: [all, android, ios]
 
 permissions: {}
 
@@ -94,7 +108,7 @@ permissions: {}
 cache-mode: none
 
 concurrency:
-  group: release-${{ github.event.release.tag_name }}
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
   # Wait in line instead of replacing a waiting run (e.g. a promotion).
   queue: max
@@ -114,6 +128,8 @@ jobs:
       bundle-id: com.example.myapp # turns on iOS and App Store Connect
       apple-app-id: "1234567890"
       pages: true
+      publish-track: ${{ inputs.track }}
+      publish-platforms: ${{ inputs.platforms }}
     secrets:
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -133,6 +149,7 @@ workflow only gets what it uses.
 | `android-keystore-path` | `android/app/key.jks` | Where the build reads the upload keystore, relative to `app-dir` |
 | `bundle-id`, `apple-app-id` | | iOS bundle ID and the app's numeric Apple ID (App Store Connect, App Information); `bundle-id` turns on the iOS build and App Store Connect |
 | `play-beta-track` | `beta` | API name of the open testing track; an app with a closed testing track named Beta from before open testing keeps it as `beta`, so its open testing track has another name, such as `openBeta` |
+| `publish-track`, `publish-platforms` | | Manual runs: where to publish the release's builds (below) |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |
 | `pages` | `false` | Deploy the web builds to GitHub Pages once Pages is enabled for the repository |
 | `environment` | | Environment of the jobs that use signing or store credentials, e.g. one with required reviewers |
@@ -180,6 +197,14 @@ them.
   Pages serves it at the root without the BETA badge; nothing is rebuilt. The
   store jobs check again that the release is still a release before changing
   anything.
+- **Publishing again:** run the release workflow by hand from the release's
+  tag ("Use workflow from", or
+  `gh workflow run release.yml --ref v1.2.0-beta.3 -f track=production`). The
+  builds that the release's run uploaded go to the chosen Google Play track
+  (`internal`, `alpha`, the open testing track or `production`) without being
+  rebuilt; on iOS, `production` submits the build for App Review and the open
+  testing track makes it a public TestFlight beta, and other tracks skip iOS.
+  `platforms` limits it to `android` or `ios`. Pages is not changed.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
   language).

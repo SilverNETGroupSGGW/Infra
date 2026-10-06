@@ -106,7 +106,7 @@ class GooglePlayTest(unittest.TestCase):
     def test_beta_upload(self):
         mock = PlayMock()
         result, api = self.run_play(
-            mock, MODE="build", CHANNEL="beta", TAG="v4.3.0-beta.1", FAKE_NOTES="Nowości"
+            mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1", FAKE_NOTES="Nowości"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(f"POST {UPLOADS}/e1/bundles", api.calls())
@@ -121,14 +121,14 @@ class GooglePlayTest(unittest.TestCase):
     def test_beta_track_with_another_name(self):
         mock = PlayMock()
         result, _ = self.run_play(
-            mock, MODE="build", CHANNEL="beta", BETA_TRACK="openBeta", TAG="v4.3.0-beta.1"
+            mock, MODE="build", TRACK="openBeta", BETA_TRACK="openBeta", TAG="v4.3.0-beta.1"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([put["track"] for put in mock.puts], ["openBeta"])
 
         mock = PlayMock(tracks={"openBeta": dict(BETA_TRACK, track="openBeta")})
         result, _ = self.run_play(
-            mock, MODE="promote", CHANNEL="prod", BETA_TRACK="openBeta", TAG="v4.3.0-beta.1"
+            mock, MODE="promote", TRACK="production", BETA_TRACK="openBeta", TAG="v4.3.0-beta.1"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
@@ -136,9 +136,23 @@ class GooglePlayTest(unittest.TestCase):
             [{"language": "pl-PL", "text": "Beta notes"}],
         )
 
+    def test_publish_an_uploaded_beta_to_a_testing_track(self):
+        mock = PlayMock(tracks={"beta": BETA_TRACK})
+        result, api = self.run_play(
+            mock, MODE="promote", TRACK="alpha", TAG="v4.3.0-beta.1", FAKE_NOTES="Notes"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn(f"POST {UPLOADS}/e1/bundles", api.calls())
+        self.assertEqual(mock.puts, [{"track": "alpha", "releases": [{
+            "name": "v4.3.0-beta.1",
+            "versionCodes": ["4030001"],
+            "status": "completed",
+            "releaseNotes": [{"language": "pl-PL", "text": "Notes"}],
+        }]}])
+
     def test_production_upload_without_notes(self):
         mock = PlayMock()
-        result, _ = self.run_play(mock, MODE="build", CHANNEL="prod", TAG="v4.3.0")
+        result, _ = self.run_play(mock, MODE="build", TRACK="production", TAG="v4.3.0")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mock.puts, [{"track": "production", "releases": [{
             "name": "v4.3.0", "versionCodes": ["4030001"], "status": "completed",
@@ -147,7 +161,7 @@ class GooglePlayTest(unittest.TestCase):
     def test_long_notes_are_shortened(self):
         mock = PlayMock()
         result, _ = self.run_play(
-            mock, MODE="build", CHANNEL="beta", TAG="v4.3.0-beta.1", FAKE_NOTES="x" * 600
+            mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1", FAKE_NOTES="x" * 600
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         text = mock.puts[0]["releases"][0]["releaseNotes"][0]["text"]
@@ -157,7 +171,7 @@ class GooglePlayTest(unittest.TestCase):
     def test_rerun_with_the_same_bundle_does_not_upload_again(self):
         sha = hashlib.sha256(BUNDLE).hexdigest()
         mock = PlayMock(bundles={"4030001": sha})
-        result, api = self.run_play(mock, MODE="build", CHANNEL="beta", TAG="v4.3.0-beta.1")
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("already uploaded", result.stdout)
         self.assertNotIn(f"POST {UPLOADS}/e1/bundles", api.calls())
@@ -165,7 +179,7 @@ class GooglePlayTest(unittest.TestCase):
 
     def test_reused_build_number_with_another_bundle_fails(self):
         mock = PlayMock(bundles={"4030001": "another"})
-        result, api = self.run_play(mock, MODE="build", CHANNEL="prod", TAG="v4.3.0")
+        result, api = self.run_play(mock, MODE="build", TRACK="production", TAG="v4.3.0")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("already uploaded with another build", result.stderr)
         self.assertEqual(mock.puts, [])
@@ -173,7 +187,7 @@ class GooglePlayTest(unittest.TestCase):
 
     def test_version_code_used_according_to_the_api_fails(self):
         mock = PlayMock(used=True)
-        result, _ = self.run_play(mock, MODE="build", CHANNEL="prod", TAG="v4.3.0")
+        result, _ = self.run_play(mock, MODE="build", TRACK="production", TAG="v4.3.0")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("This build number was already uploaded", result.stderr)
         self.assertEqual(mock.puts, [])
@@ -181,7 +195,7 @@ class GooglePlayTest(unittest.TestCase):
     def test_promote_with_notes(self):
         mock = PlayMock(tracks={"beta": BETA_TRACK})
         result, api = self.run_play(
-            mock, MODE="promote", CHANNEL="prod", TAG="v4.3.0-beta.1",
+            mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1",
             FAKE_NOTES="Release notes",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -195,7 +209,7 @@ class GooglePlayTest(unittest.TestCase):
 
     def test_promote_without_notes_keeps_the_beta_notes(self):
         mock = PlayMock(tracks={"beta": BETA_TRACK})
-        result, _ = self.run_play(mock, MODE="promote", CHANNEL="prod", TAG="v4.3.0-beta.1")
+        result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             mock.puts[0]["releases"][0]["releaseNotes"],
@@ -210,14 +224,14 @@ class GooglePlayTest(unittest.TestCase):
             }]}},
         )
         result, _ = self.run_play(
-            mock, MODE="promote", CHANNEL="prod", TAG="v4.3.0-beta.1", FAKE_NOTES="Notes"
+            mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1", FAKE_NOTES="Notes"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mock.puts[0]["releases"][0]["versionCodes"], ["4030001"])
 
     def test_promote_a_beta_that_was_never_uploaded_fails(self):
         mock = PlayMock()
-        result, _ = self.run_play(mock, MODE="promote", CHANNEL="prod", TAG="v4.3.0-beta.1")
+        result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("is not in Google Play", result.stderr)
         self.assertEqual(mock.puts, [])
@@ -228,7 +242,7 @@ class GooglePlayTest(unittest.TestCase):
             "releases": [{"name": "4.2.0", "versionCodes": ["420003"],
                           "status": "inProgress", "userFraction": 0.2}],
         }})
-        result, _ = self.run_play(mock, MODE="promote", CHANNEL="prod", TAG="v4.3.0-beta.1")
+        result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("staged rollout", result.stderr)
         self.assertEqual(mock.puts, [])
@@ -239,13 +253,13 @@ class GooglePlayTest(unittest.TestCase):
             "releases": [{"name": "4.2.0", "versionCodes": ["420003"],
                           "status": "halted", "userFraction": 0.2}],
         }})
-        result, _ = self.run_play(mock, MODE="promote", CHANNEL="prod", TAG="v4.3.0-beta.1")
+        result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(mock.puts), 1)
 
     def test_commit_that_needs_a_manual_review_is_left_for_play_console(self):
         mock = PlayMock(manual_review=True)
-        result, api = self.run_play(mock, MODE="build", CHANNEL="beta", TAG="v4.3.0-beta.1")
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(api.calls().count(f"POST {EDITS}/e1:commit"), 2)
         self.assertEqual(
@@ -255,7 +269,7 @@ class GooglePlayTest(unittest.TestCase):
 
     def test_promote_names_the_release_after_the_version(self):
         mock = PlayMock(tracks={"beta": BETA_TRACK})
-        result, _ = self.run_play(mock, MODE="promote", CHANNEL="prod", TAG="4.3.0-rc1")
+        result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="4.3.0-rc1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mock.puts[0]["releases"][0]["name"], "4.3.0")
 

@@ -9,6 +9,10 @@ name: Flutter release
 # optional), and turning a beta into a release promotes the beta's builds
 # without rebuilding them. The Google Play and App Store jobs run once the app
 # passes its store ID and the store variables are set.
+#
+# The caller can also run on workflow_dispatch, from a release's tag, to publish
+# that release's store builds again without building: to publish-track, on the
+# publish-platforms.
 
 on:
   workflow_call:
@@ -38,6 +42,12 @@ on:
         description: API name of the Google Play open testing track that gets the betas. An app that had a closed testing track named Beta before Play added open testing keeps that track as `beta`; its open testing track has another name, such as `openBeta`.
         type: string
         default: beta
+      publish-track:
+        description: "Manual runs (workflow_dispatch, from a release's tag): the Google Play track to publish the release's build to, e.g. `internal`, `alpha`, the open testing track or `production`. On iOS, `production` submits the build for App Review and the open testing track makes it a public TestFlight beta; iOS has no other tracks."
+        type: string
+      publish-platforms:
+        description: "Manual runs: `all` (the default), `android` or `ios`."
+        type: string
       play-notes-language:
         description: Language of the Google Play release notes; one of the store listing's languages.
         type: string
@@ -94,7 +104,11 @@ jobs:
     timeout-minutes: 5
     outputs:
       mode: ${{ steps.version.outputs.mode }}
+      manual: ${{ steps.version.outputs.manual }}
       channel: ${{ steps.version.outputs.channel }}
+      play-track: ${{ steps.version.outputs.play-track }}
+      android: ${{ steps.version.outputs.android }}
+      ios: ${{ steps.version.outputs.ios }}
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
       build-number: ${{ steps.version.outputs.build-number }}
@@ -104,13 +118,24 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ github.event.release.tag_name || github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
           PRERELEASE: ${{ github.event.release.prerelease }}
+          TRACK: ${{ inputs.publish-track }}
+          PLATFORMS: ${{ inputs.publish-platforms }}
+          BETA_TRACK: ${{ inputs.play-beta-track }}
         run: |
-          if [ "$EVENT" != release ]; then
-            echo "::error::Call this workflow from a workflow that runs on release events."
-            exit 1
-          fi
+          case "$EVENT/$REF_TYPE" in
+            release/* | workflow_dispatch/tag) ;;
+            workflow_dispatch/*)
+              echo "::error::Run the workflow from the tag of the release to publish (\"Use workflow from\" or --ref)."
+              exit 1
+              ;;
+            *)
+              echo "::error::Call this workflow from a workflow that runs on release events (and on workflow_dispatch to publish a release again)."
+              exit 1
+              ;;
+          esac
           # [v]X.Y.Z, or [v]X.Y.Z-<label><N> such as 1.2.0-beta.3 or 1.2.0-rc2.
           semver='^v?(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-([0-9A-Za-z.-]*[A-Za-z.-])?([1-9][0-9]?))?$'
           if [[ ! $TAG =~ $semver ]] || ((BASH_REMATCH[1] > 2099 || BASH_REMATCH[6] > 98)); then
@@ -123,36 +148,72 @@ jobs:
           # after its pre-releases: 1.2.3-beta.4 builds 1020304, 1.2.3 builds
           # 1020399. A promoted beta keeps its build number.
           build_number=$((BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 10000 + BASH_REMATCH[3] * 100 + ${BASH_REMATCH[6]:-99}))
-          case "$ACTION/$PRERELEASE/${pre:+pre}" in
-            published/true/pre) mode=build channel=beta ;;
-            published/false/) mode=build channel=prod ;;
-            released/*/pre) mode=promote channel=prod ;;
-            released/*/)
-              # Published directly as a release: the published run builds it.
-              mode=skip channel=prod
-              echo "::notice::The published run of $TAG builds it. If that run failed because \"pre-release\" was ticked by mistake, delete the release (keep the tag) and publish it again."
-              ;;
-            published/true/)
-              echo "::error::A pre-release needs a pre-release tag such as $TAG-beta.1: delete this release (keep the tag) and publish it again, as a release or with a pre-release tag."
+          manual=false android=true ios=true
+          if [ "$EVENT" = workflow_dispatch ]; then
+            # Publishes the builds that the release's run uploaded to the stores.
+            manual=true mode=promote play_track=$TRACK
+            case "$TRACK" in
+              production) channel=prod ;;
+              "$BETA_TRACK") channel=beta ;;
+              "")
+                echo "::error::Pass the publish-track input."
+                exit 1
+                ;;
+              *)
+                channel=beta ios=false
+                echo "::notice::iOS has no $TRACK track; publish to production or $BETA_TRACK to publish on iOS."
+                ;;
+            esac
+            case "$PLATFORMS" in
+              all | "") ;;
+              android) ios=false ;;
+              ios) android=false ;;
+              *)
+                echo "::error::publish-platforms is all, android or ios, not $PLATFORMS."
+                exit 1
+                ;;
+            esac
+            if [ "$android$ios" = falsefalse ]; then
+              echo "::error::Nothing to publish."
               exit 1
-              ;;
-            published/false/pre)
-              echo "::error::$TAG is a pre-release tag: delete this release (keep the tag) and publish it again, as a pre-release or as a release tagged ${TAG%%-*}."
-              exit 1
-              ;;
-            *)
-              echo "::error::Unexpected release action $ACTION."
-              exit 1
-              ;;
-          esac
+            fi
+          else
+            case "$ACTION/$PRERELEASE/${pre:+pre}" in
+              published/true/pre) mode=build channel=beta ;;
+              published/false/) mode=build channel=prod ;;
+              released/*/pre) mode=promote channel=prod ;;
+              released/*/)
+                # Published directly as a release: the published run builds it.
+                mode=skip channel=prod
+                echo "::notice::The published run of $TAG builds it. If that run failed because \"pre-release\" was ticked by mistake, delete the release (keep the tag) and publish it again."
+                ;;
+              published/true/)
+                echo "::error::A pre-release needs a pre-release tag such as $TAG-beta.1: delete this release (keep the tag) and publish it again, as a release or with a pre-release tag."
+                exit 1
+                ;;
+              published/false/pre)
+                echo "::error::$TAG is a pre-release tag: delete this release (keep the tag) and publish it again, as a pre-release or as a release tagged ${TAG%%-*}."
+                exit 1
+                ;;
+              *)
+                echo "::error::Unexpected release action $ACTION."
+                exit 1
+                ;;
+            esac
+            if [ "$mode/$channel" = build/beta ]; then play_track=$BETA_TRACK; else play_track=production; fi
+          fi
           {
             echo "mode=$mode"
+            echo "manual=$manual"
             echo "channel=$channel"
+            echo "play-track=$play_track"
+            echo "android=$android"
+            echo "ios=$ios"
             echo "tag=$TAG"
             echo "version=$version"
             echo "build-number=$build_number"
           } >> "$GITHUB_OUTPUT"
-          echo "$TAG: $mode ($channel), version $version, build $build_number" >> "$GITHUB_STEP_SUMMARY"
+          echo "$TAG: $mode ($channel, Google Play track $play_track), version $version, build $build_number" >> "$GITHUB_STEP_SUMMARY"
       # Fail before any build when a store is half set up. Secrets kept in an
       # environment only reach the jobs that name it; those jobs check them.
       - if: ${{ steps.version.outputs.mode != 'skip' }}
@@ -327,7 +388,7 @@ jobs:
         run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
 
   promote:
-    name: Check the beta's builds
+    name: Check the release's builds
     needs: plan
     if: ${{ needs.plan.outputs.mode == 'promote' }}
     runs-on: ubuntu-24.04
@@ -335,7 +396,15 @@ jobs:
     permissions:
       contents: read # read the release
     steps:
-      - name: Check that the release workflow built the beta
+      - if: ${{ needs.plan.outputs.manual == 'true' }}
+        name: Check that the release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        # The stores check that they have its builds.
+        run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null
+      - if: ${{ needs.plan.outputs.manual != 'true' }}
+        name: Check that the release workflow built the beta
         env:
           GH_TOKEN: ${{ github.token }}
           PREFIX: ${{ inputs.artifact-prefix }}
@@ -359,6 +428,7 @@ jobs:
     needs: [plan, publish, promote]
     if: >-
       ${{ !cancelled() && inputs.android-package != '' && vars.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
+      && needs.plan.outputs.android == 'true'
       && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -374,7 +444,7 @@ jobs:
     steps:
       # The job may have waited behind other releases' store jobs: check the
       # live state again before changing anything.
-      - if: ${{ needs.plan.outputs.mode == 'promote' }}
+      - if: ${{ needs.plan.outputs.mode == 'promote' && needs.plan.outputs.manual != 'true' }}
         name: Check that the release is still a release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -417,7 +487,7 @@ jobs:
           PACKAGE_NAME: ${{ inputs.android-package }}
           BUNDLE_PATH: dist/${{ inputs.artifact-prefix }}-${{ needs.plan.outputs.tag }}.aab
           MODE: ${{ needs.plan.outputs.mode }}
-          CHANNEL: ${{ needs.plan.outputs.channel }}
+          TRACK: ${{ needs.plan.outputs.play-track }}
           BETA_TRACK: ${{ inputs.play-beta-track }}
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION_CODE: ${{ needs.plan.outputs.build-number }}
@@ -598,6 +668,7 @@ jobs:
     needs: [plan, ios-upload, promote]
     if: >-
       ${{ !cancelled() && inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != ''
+      && needs.plan.outputs.ios == 'true'
       && (needs.ios-upload.result == 'success' || needs.promote.result == 'success') }}
     runs-on: ubuntu-24.04
     # Waits for App Store Connect to process a new upload.
@@ -612,7 +683,7 @@ jobs:
     steps:
       # The job may have waited behind other releases' store jobs: check the
       # live state again before changing anything.
-      - if: ${{ needs.plan.outputs.mode == 'promote' }}
+      - if: ${{ needs.plan.outputs.mode == 'promote' && needs.plan.outputs.manual != 'true' }}
         name: Check that the release is still a release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -656,6 +727,7 @@ jobs:
     needs: [plan, publish, promote]
     if: >-
       ${{ !cancelled() && inputs.pages && github.event.repository.has_pages
+      && needs.plan.outputs.manual != 'true'
       && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
     permissions:
       contents: read # read the releases and their web builds
