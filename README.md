@@ -400,8 +400,7 @@ administrator sets this up once:
    accounts. It creates the `apps` workspace in HCP Terraform, the
    `silvernet-infra` project with the Terraform service account and its
    sign-in, its rights on the apps' projects (and their display names), the
-   Play Console admin permission, the `terraform` environment and the
-   workflow's repository variables:
+   `terraform` environment and the workflow's repository variables:
 
    ```sh
    gcloud auth application-default login --scopes=openid,\

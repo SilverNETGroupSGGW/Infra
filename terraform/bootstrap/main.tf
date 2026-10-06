@@ -78,6 +78,7 @@ provider "github" {
   owner = "SilverNETGroupSGGW"
 }
 
+# Kept so the next apply can remove the Terraform account's Play access.
 provider "googleplay" {
   developer_id = "8827645756827128332" # KN Silver .NET
 }
@@ -225,12 +226,6 @@ resource "google_project_iam_member" "terraform" {
   project = google_project.apps[each.value.app].project_id
   role    = each.value.role
   member  = google_service_account.terraform.member
-}
-
-# Inviting the apps' service accounts needs the Play Console admin permission.
-resource "googleplay_user" "terraform" {
-  email              = google_service_account.terraform.email
-  global_permissions = ["CAN_MANAGE_PERMISSIONS_GLOBAL"]
 }
 
 resource "github_repository_environment" "terraform" {
