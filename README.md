@@ -192,19 +192,16 @@ them.
   to the release. For a public beta (`beta`, `rc`), Google Play gets the
   bundle on the open testing track, TestFlight gets the iOS build in a group
   with a public link and sends it to Beta App Review (the link is in the run
-  summary), and Pages serves it under `/beta/`. Every new beta replaces the
-  previous one for its testers.
+  summary), and Pages serves it under `/beta/`.
 - **Private and internal tests:** an `alpha` pre-release goes to the closed
-  testing track (`play-alpha-track`) and to the TestFlight group "Private
-  beta" (created without a public link; invite its testers in App Store
-  Connect) after Beta App Review. An `internal` pre-release goes to the
-  `internal` track and stays with TestFlight's internal testers. Pages skips
-  both, but the GitHub release and its builds are as visible as the
-  repository. No build is copied to another track, but a Google Play tester
-  gets the highest build number among the tracks they joined (production
-  counts for everyone): a private tester who also joined open testing gets a
-  newer beta. On TestFlight, internal groups with automatic distribution get
-  every build; external groups only the builds added to them.
+  testing track (`play-alpha-track`) and, after Beta App Review, to the
+  TestFlight group "Private beta", which has no public link; invite its
+  testers in App Store Connect. An `internal` pre-release goes to the
+  `internal` track and TestFlight's internal testers. Pages skips both, though
+  the GitHub release stays as visible as the repository. Builds are never
+  copied between tracks, but a Play tester gets the highest build number among
+  the tracks they joined, production included, and TestFlight's internal
+  groups with automatic distribution get every build.
 - **Production:** publish a release tagged `X.Y.Z`. Google Play gets it on the
   production track, App Review gets the iOS build (released once approved),
   and Pages serves it at the site root.
@@ -217,11 +214,10 @@ them.
   tag ("Use workflow from", or
   `gh workflow run release.yml --ref v1.2.0-beta.3 -f track=production`). The
   builds that the release's run uploaded go to the chosen Google Play track
-  (`internal`, the closed or open testing track, `production` or another
-  track) without being rebuilt; on iOS, `production` submits the build for App
-  Review, the open and closed testing tracks make it a public or private
-  TestFlight beta, `internal` leaves it to the internal testers, and other
-  tracks skip iOS.
+  (`internal`, the closed or open testing track, `production` or another)
+  without being rebuilt. iOS follows along: App Review for `production`, a
+  public or private TestFlight beta for the open or closed testing track, the
+  internal testers for `internal`; other tracks skip iOS.
   `platforms` limits it to `android` or `ios`. Pages is not changed.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
@@ -453,7 +449,7 @@ gh secret set ANDROID_STORE_PASSWORD --env release
 
 Public betas go to the open testing track, private tests to the closed
 testing track, internal tests to the internal track and releases to
-production, all at once. Each upload replaces the release on its track. Open
+production, all at once, each replacing the release on its track. Open
 testing needs its countries or regions chosen once in Play Console (Test and
 release → Open testing), closed testing its testers. A staged rollout started
 in Play Console stops the job until it is finished or halted. With managed
@@ -493,7 +489,7 @@ group with a public link (a new "Public beta" group if there is none), turns on
 "Automatically notify testers", sends it to Beta App Review and puts the public
 link in the run summary; testers get the build once Apple approves it.
 Private tests go the same way to the group "Private beta", which has no public
-link, and internal tests only get "What to Test" for the internal testers.
+link. Internal tests only get "What to Test".
 TestFlight test information that is still empty (Beta App Review contact, beta
 description, feedback e-mail) is filled from the App Store review details and
 description, and the release description becomes "What to Test". Releases and

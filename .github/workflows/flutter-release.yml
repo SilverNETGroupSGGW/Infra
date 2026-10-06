@@ -4,11 +4,11 @@ name: Flutter release
 # publish them to Google Play, App Store Connect and GitHub Pages.
 #
 # Call it from a workflow that runs `on: release: types: [published, released]`
-# (see README.md). The tag sets the version and the testers: a release tagged
-# X.Y.Z goes to production (a leading "v" is optional), a pre-release tagged
-# X.Y.Z-beta.N (or rc.N) is a public beta, X.Y.Z-alpha.N a private test and
-# X.Y.Z-internal.N an internal test. Turning a pre-release into a release
-# promotes its builds without rebuilding them. The Google Play and App Store
+# (see README.md). The tag sets the version and the testers: X.Y.Z goes to
+# production (a leading "v" is optional), X.Y.Z-beta.N or rc.N to public
+# testing, X.Y.Z-alpha.N to private testing and X.Y.Z-internal.N to internal
+# testing. Turning a pre-release into a release promotes its builds without
+# rebuilding them. The Google Play and App Store
 # jobs run once the app passes its store ID and the store variables are set.
 #
 # The caller can also run on workflow_dispatch, from a release's tag, to publish
@@ -44,11 +44,11 @@ on:
         type: string
         default: beta
       play-alpha-track:
-        description: API name of the Google Play closed testing track that gets the alpha pre-releases (private tests).
+        description: API name of the Google Play closed testing track that gets the alpha pre-releases.
         type: string
         default: alpha
       publish-track:
-        description: "Manual runs (workflow_dispatch, from a release's tag): the Google Play track to publish the release's build to: `internal`, the closed testing track (play-alpha-track), the open testing track (play-beta-track), `production` or another track. On iOS, `production` submits the build for App Review, the open testing track makes it a public TestFlight beta, the closed testing track a private one and `internal` leaves it to the internal testers; other tracks skip iOS."
+        description: "Manual runs (workflow_dispatch, from a release's tag): the Google Play track to publish the release's build to, e.g. `internal`, play-alpha-track, play-beta-track or `production`. On iOS these mean the internal testers, a private or public TestFlight beta and App Review; other tracks skip iOS."
         type: string
       publish-platforms:
         description: "Manual runs: `all` (the default), `android` or `ios`."
@@ -108,7 +108,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read # read the other tags of the version
+      contents: read # check the version's other tags
     outputs:
       mode: ${{ steps.version.outputs.mode }}
       manual: ${{ steps.version.outputs.manual }}
@@ -154,8 +154,7 @@ jobs:
           version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           pre=${BASH_REMATCH[4]}
           number=${BASH_REMATCH[6]}
-          # The label picks the testers. flutter-pages.yml serves only the
-          # public labels under /beta/.
+          # flutter-pages.yml repeats the public labels.
           label=${BASH_REMATCH[5]%[.-]}
           case "${label,,}" in
             beta | rc) testers=beta ;;
@@ -234,8 +233,7 @@ jobs:
               *) play_track=production ;;
             esac
           fi
-          # The build number comes from the version and N alone, so another
-          # pre-release of the version with the same N would collide in the stores.
+          # Pre-releases of a version with the same N share a build number.
           if [ "$mode" = build ] && [ -n "$pre" ]; then
             refs='.[].ref | ltrimstr("refs/tags/")'
             others=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$version-" --jq "$refs" &&
@@ -390,7 +388,6 @@ jobs:
           printf '\nversion: %s\n' "$VERSION" >> pubspec.yaml
       - name: Build
         env:
-          # Every pre-release gets the BETA badge.
           CHANNEL: ${{ needs.plan.outputs.channel == 'prod' && 'prod' || 'beta' }}
         run: mise run build:web --channel "$CHANNEL"
       - name: Zip the build

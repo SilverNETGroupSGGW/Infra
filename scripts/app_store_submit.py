@@ -10,10 +10,9 @@ beta: it sets "What to Test" from the GitHub release description, fills in
 missing TestFlight test information from the app's App Store details, adds the
 build to an external group with a public link (created if needed) and submits
 it for Beta App Review. The public link is printed and added to the job
-summary. A private test (CHANNEL=alpha) goes the same way to the external group
-"Private beta", which has no public link: its testers are invited in App Store
-Connect. An internal test (CHANNEL=internal) only gets "What to Test" and stays
-with the internal testers.
+summary. A private test (CHANNEL=alpha) goes the same way to the group
+"Private beta", which has no public link. An internal test (CHANNEL=internal)
+only gets "What to Test".
 
 For a release or a promotion it attaches the build to the App Store version
 VERSION (created if needed), sets "What's New" from the GitHub release
