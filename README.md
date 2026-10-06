@@ -439,7 +439,8 @@ The workflow signs in with Workload Identity Federation, set up by
 `terraform/apps`. Invite its `releases@<project>.iam.gserviceaccount.com`
 service account in Play Console (Users and permissions) with "Release to
 testing tracks" and "Release to production, exclude devices, and use Play App
-Signing" for this app only. Store the upload key as secrets of
+Signing" for this app only, plus "Manage store presence" with
+`screenshots-task` (the listing's screenshots). Store the upload key as secrets of
 the release environment (without `--env release` while the app has no
 environment):
 
