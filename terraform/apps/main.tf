@@ -90,7 +90,6 @@ module "plan_wzim" {
   source = "../app-release"
 
   repository            = "SilverTimetable2"
-  android_package       = "com.silvernet.silvertimetable"
   google_project_id     = "silvertimetable-bea41"
   create_google_project = false # the app's Firebase project
   # google_folder_id    = var.apps_folder_id
@@ -112,7 +111,6 @@ module "dni_sggw" {
   source = "../app-release"
 
   repository            = "sggw_days"
-  android_package       = "com.silvernet.sggw_days"
   google_project_id     = "sggw-days"
   create_google_project = false # the app's Firebase project
   # google_folder_id    = var.apps_folder_id
@@ -131,7 +129,6 @@ module "dni_sggw" {
 #   source = "../app-release"
 #
 #   repository            = "kampus_sggw"
-#   android_package       = "com.silvers.kampus_sggw_remake"
 #   google_project_id     = "kampus-sggw-2021"
 #   create_google_project = false # the app's Firebase project
 #   # google_folder_id    = var.apps_folder_id
@@ -140,6 +137,36 @@ module "dni_sggw" {
 #   apple_team_id               = local.apple.team_id
 #   app_store_connect_issuer_id = local.apple.issuer_id
 # }
+
+# Play's users API refuses the Terraform account, so the release accounts'
+# Play Console access is granted by hand; forget it without deleting it.
+removed {
+  from = module.plan_wzim.googleplay_user.releases
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = module.plan_wzim.googleplay_app_iam.releases
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = module.dni_sggw.googleplay_user.releases
+  lifecycle {
+    destroy = false
+  }
+}
+
+removed {
+  from = module.dni_sggw.googleplay_app_iam.releases
+  lifecycle {
+    destroy = false
+  }
+}
 
 # Variables set by hand before Terraform managed them.
 import {

@@ -10,9 +10,5 @@ terraform {
       source  = "hashicorp/google"
       version = ">= 8.0, < 9.0"
     }
-    googleplay = {
-      source  = "oliver-binns/googleplay"
-      version = ">= 0.6.3, < 0.7.0"
-    }
   }
 }

@@ -1,5 +1,5 @@
-# One app's release setup: keyless Play sign-in, Play Console access, and the
-# repository's release environment and variables (secrets: `gh secret set`).
+# One app's release setup: keyless Play sign-in and the repository's release
+# environment and variables (secrets: `gh secret set`).
 
 data "github_repository" "app" {
   name = var.repository
@@ -81,27 +81,6 @@ resource "google_service_account_iam_member" "releases_github" {
   service_account_id = google_service_account.releases.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repository_id}"
-}
-
-# The Play Console invite of the service account, limited to this app's
-# releases.
-resource "googleplay_user" "releases" {
-  email = google_service_account.releases.email
-  # The provider requires an account-wide permission; this is the narrowest
-  # (read-only crash and vitals data).
-  global_permissions = ["CAN_VIEW_APP_QUALITY_GLOBAL"]
-}
-
-resource "googleplay_app_iam" "releases" {
-  app_id  = var.android_package
-  user_id = googleplay_user.releases.email
-  permissions = [
-    "CAN_MANAGE_TRACK_APKS",  # Release to testing tracks
-    "CAN_MANAGE_PUBLIC_APKS", # Release to production, exclude devices, and use Play App Signing
-    # Implied by the two above.
-    "CAN_VIEW_NON_FINANCIAL_DATA",
-    "CAN_VIEW_APP_QUALITY",
-  ]
 }
 
 resource "github_repository_environment" "release" {
