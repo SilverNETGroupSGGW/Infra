@@ -46,7 +46,7 @@ terraform {
 # }
 
 # The organization's Terraform GitHub App. The workflow writes its private key
-# to a file, so that the key never ends up in a saved plan.
+# to a file, so the key never ends up in a saved plan.
 variable "github_app_id" {
   type = string
 }
@@ -112,8 +112,8 @@ module "plan_wzim" {
   app_store_uses_non_exempt_encryption = false
 }
 
-# Dni SGGW still releases with its own workflows (sggw_days/.github/workflows);
-# these settings are for flutter-release.yml once it moves to it.
+# Dni SGGW releases with its own workflows (sggw_days/.github/workflows); these
+# settings are for when it moves to flutter-release.yml.
 module "dni_sggw" {
   source = "../app-release"
 
@@ -148,7 +148,7 @@ module "dni_sggw" {
 #   app_store_connect_issuer_id = local.apple.issuer_id
 # }
 
-# Variables that were set by hand before Terraform managed them.
+# Variables set by hand before Terraform managed them.
 import {
   to = module.plan_wzim.github_actions_variable.release["APPLE_TEAM_ID"]
   id = "SilverTimetable2:APPLE_TEAM_ID"

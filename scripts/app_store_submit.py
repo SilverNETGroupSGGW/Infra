@@ -262,10 +262,8 @@ def set_what_to_test(build_id, locale, notes):
 
 
 def app_store_details(app_id):
-    """App Review's contact details and the App Store descriptions, newest first.
-
-    The contact details come from the newest App Store version that has them.
-    """
+    """App Review contact details from the newest version that has them, and the
+    App Store descriptions, newest first."""
     response = call("GET", f"/v1/apps/{app_id}/appStoreVersions", {
         "filter[platform]": "IOS",
         "fields[appStoreVersions]":
@@ -313,11 +311,10 @@ def fill(resource, values):
 
 
 def fill_test_information(app_id, locale):
-    """Fills in the missing TestFlight test information from the App Store details.
+    """Copies missing TestFlight test information from the App Store details.
 
-    External testing needs a Beta App Review contact and, in the app's primary
-    language, a beta app description and a feedback e-mail. Fields that are set
-    are kept.
+    External testing needs a Beta App Review contact and, in the primary
+    language, a beta app description and feedback e-mail. Set fields are kept.
     """
     detail = call("GET", f"/v1/apps/{app_id}/betaAppReviewDetail", {
         "fields[betaAppReviewDetails]": ",".join(CONTACT + DEMO_ACCOUNT),

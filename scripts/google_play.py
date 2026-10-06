@@ -1,10 +1,10 @@
 """Publishes a release to Google Play with the Play Developer API.
 
 Run by .github/workflows/flutter-release.yml. MODE=build uploads the App Bundle
-BUNDLE_PATH and releases it on the track TRACK; MODE=promote releases a version
-code that an earlier run uploaded on TRACK without uploading again, also when a
-later beta has replaced it on the open testing track BETA_TRACK. A release on
-production is named after the version without its pre-release label.
+BUNDLE_PATH and releases it on the track TRACK; MODE=promote releases on TRACK a
+version code an earlier run uploaded, without uploading it again, even if a later
+beta replaced it on the open testing track BETA_TRACK. A production release is
+named after the version without its pre-release label.
 
 Environment: ACCESS_TOKEN (OAuth token with the androidpublisher scope),
 PACKAGE_NAME (the Android application ID), MODE, TRACK, BETA_TRACK, TAG,
@@ -85,13 +85,13 @@ def commit(edit):
     except ApiError as error:
         if "changesNotSentForReview to true" not in error.body:
             raise
-        # The app needs its changes sent for review by hand in Play Console.
+        # This app's changes must be sent for review by hand in Play Console.
         call("POST", url + "?changesNotSentForReview=true")
         print("::notice::Send the changes for review in Play Console.")
 
 
 def uploaded_bundles(edit):
-    """The App Bundles of the app, by version code."""
+    """The app's App Bundles by version code."""
     listed = call("GET", f"{API}/edits/{edit}/bundles").get("bundles", [])
     return {str(bundle["versionCode"]): bundle for bundle in listed}
 

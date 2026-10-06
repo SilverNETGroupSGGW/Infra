@@ -404,8 +404,8 @@ class AppStoreSubmitTest(unittest.TestCase):
         self.assertFalse(mock.encryption)
         self.assertEqual(mock.what_to_test,
                          {"notes-new": {"locale": "pl", "whatsNew": "Nowości"}})
-        # From the newest App Store version with App Review details, and the
-        # description in the primary language.
+        # Contact from the newest version with App Review details; description
+        # in the primary language.
         self.assertEqual(mock.beta_contact, REVIEW)
         self.assertEqual(mock.beta_listings, {"listing-new": {
             "locale": "pl",

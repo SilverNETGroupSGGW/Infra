@@ -265,7 +265,7 @@ resource "github_repository_environment_deployment_policy" "terraform_main" {
   branch_pattern = "main"
 }
 
-# Repository variables, so that the plan job reads them without an approval.
+# Repository variables, so the plan job reads them without an approval.
 resource "github_actions_variable" "terraform" {
   for_each = {
     TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.terraform.name

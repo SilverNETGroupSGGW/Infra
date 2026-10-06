@@ -355,22 +355,22 @@ Also:
 [`terraform/apps`](terraform/apps/main.tf) describes the store release setup
 of every app with the [`terraform/app-release`](terraform/app-release) module:
 keyless Google Play sign-in in the app's Google Cloud project (its Firebase
-project), the service
-account's release access to the app in Play Console, the app repository's
-release environment (required reviewers, release tags allowed) and the
-repository variables the workflow reads. Secrets stay out of Terraform; set
-them with `gh secret set`. [`terraform/apps/firebase.tf`](terraform/apps/firebase.tf)
-also tracks the apps' Firebase projects, apps, Firestore databases, buckets
-and Hosting sites; their deployments (rules, Hosting releases, Functions) stay
-with the apps' `firebase deploy`.
+project), the service account's release access to the app in Play Console,
+the app repository's release environment (required reviewers, release tags
+allowed) and the repository variables the workflow reads. Secrets stay out of
+Terraform; set them with `gh secret set`.
+[`terraform/apps/firebase.tf`](terraform/apps/firebase.tf) also tracks the
+apps' Firebase projects, apps, Firestore databases, buckets and Hosting sites;
+their deployments (rules, Hosting releases, Functions) stay with the apps'
+`firebase deploy`.
 
-To add an app, add its project to `apps` of `terraform/bootstrap` and
-apply that (it gives the Terraform service account its roles there), then add
-a module block to `terraform/apps/main.tf` and merge it to `main`. The
+To add an app, add its project to `apps` of `terraform/bootstrap` and apply
+that (it gives the Terraform service account its roles there), then add a
+module block to `terraform/apps/main.tf` and merge it to `main`. The
 [Terraform workflow](.github/workflows/terraform.yml) plans the change and,
 once a reviewer of the `terraform` environment has read the plan in the run
-summary and approved the apply job, applies it. Settings that already exist get
-an `import` block, as the ones set by hand before.
+summary and approved the apply job, applies it. Settings that already exist,
+such as those set by hand before, get an `import` block.
 
 Pass `environment: release` to `flutter-release.yml` when the app has the
 release environment: its Google provider then only accepts tokens of this
@@ -383,12 +383,11 @@ and leave `environment` out of the workflow.
 The workflow signs in to Google Cloud as the Terraform service account
 (Workload Identity Federation, only `terraform.yml` from `main`) and to GitHub
 as the organization's Terraform GitHub App, and keeps the state in HCP
-Terraform's free tier. Its plan job runs without an approval; the apply job
-waits for a reviewer of the `terraform` environment. The repository is public,
-so the run summary lists only the changing resources, the logs show no plan
-or apply values, and the saved plan is encrypted between the two jobs. No
-Google Cloud billing account is linked to anything, so nothing can be billed.
-An administrator sets this up once:
+Terraform's free tier. The repository is public, so the run summary lists
+only the changing resources, the logs show no plan or apply values, and the
+saved plan is encrypted between the plan and apply jobs. No Google Cloud
+billing account is linked to anything, so nothing can be billed. An
+administrator sets this up once:
 
 1. Have the club's HCP Terraform organization `KN-Silver` (free plan; the
    bootstrap imports it) and a team API token for the workflow, stored as the
@@ -433,12 +432,12 @@ optional; the commented-out parts of `terraform/bootstrap` and
 ### Google Play
 
 The App Bundle is signed with the app's upload key (the `ANDROID_*` secrets).
-No Google key is stored: the workflow signs in with Workload Identity
-Federation, set up by `terraform/apps` together with the service account's
-Play Console access ("Release to testing tracks" and "Release to
-production, exclude devices, and use Play App Signing" for this app only).
-Store the upload key as secrets of the release environment (without
-`--env release` while the app has no environment):
+The workflow signs in with Workload Identity Federation, set up by
+`terraform/apps` together with the service account's Play Console access
+("Release to testing tracks" and "Release to production, exclude devices, and
+use Play App Signing" for this app only). Store the upload key as secrets of
+the release environment (without `--env release` while the app has no
+environment):
 
 ```sh
 base64 -w0 key.jks | gh secret set ANDROID_KEYSTORE_BASE64 --env release
@@ -464,10 +463,10 @@ count ten times against the Actions minutes of a private repository.
 
 1. In App Store Connect, Users and Access → Integrations → App Store Connect
    API, create a team key with the Admin role (cloud signing needs it; the
-   Account Holder enables API access once). Download the `.p8` file; it can
-   only be downloaded once. Every team key reaches all apps of the team; a key
-   per app can still be revoked on its own. This step stays manual: the App
-   Store Connect API cannot create API keys.
+   Account Holder enables API access once). Download the `.p8` file, which
+   can only be downloaded once. Every team key reaches all apps of the team; a
+   key per app can still be revoked on its own. The App Store Connect API
+   cannot create API keys, so this step stays manual.
 2. Store the `.p8` contents as a secret of the release environment
    (`gh secret set APP_STORE_CONNECT_KEY --env release < AuthKey_KEYID.p8`;
    the repository without an environment), and pass its key ID, the issuer ID
@@ -484,21 +483,19 @@ count ten times against the Actions minutes of a private repository.
 4. Answer the age rating questions in App Information; App Store Connect asks
    new ones before it accepts updates.
 
-Public betas go to TestFlight's public testers: the job adds the build to an external
-group with a public link (a new "Public beta" group if there is none), turns on
-"Automatically notify testers", sends it to Beta App Review and puts the public
-link in the run summary; testers get the build once Apple approves it.
-Private tests go the same way to the group "Private beta", which has no public
-link. Internal tests only get "What to Test".
+Public betas go to TestFlight's public testers: the job adds the build to an
+external group with a public link (a new "Public beta" group if there is
+none), turns on "Automatically notify testers", sends it to Beta App Review
+and puts the public link in the run summary; testers get the build once Apple
+approves it. Private tests go the same way to the group "Private beta", which
+has no public link. Internal tests only get "What to Test".
 TestFlight test information that is still empty (Beta App Review contact, beta
 description, feedback e-mail) is filled from the App Store review details and
-description, and the release description becomes "What to Test". Releases and
-promotions are submitted for App Review with the release description as "What's
-New" in every language, and released once approved. A released version accepts
-no new builds, so the beta after a release needs a higher version name. Apple
-reviews one build per version at a time: a beta published while the previous
-beta of its version is still in Beta App Review fails the App Store Connect
-job; re-run the job once that review is done.
+description, and the release description becomes "What to Test". A released
+version accepts no new builds, so the beta after a release needs a higher
+version name. Apple reviews one build per version at a time: a beta published
+while the previous beta of its version is still in Beta App Review fails the
+App Store Connect job; re-run the job once that review is done.
 
 ## Development
 

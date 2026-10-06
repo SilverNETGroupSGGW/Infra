@@ -20,10 +20,10 @@ SPECS = Path(__file__).resolve().parent / "specs"
 
 
 class MockApi:
-    """A local HTTP server that answers with handler(request) and records requests.
+    """Local HTTP server that records requests and answers with handler(request).
 
-    handler gets a Request and returns (status, JSON body or None). An exception
-    raised by the handler is recorded in errors and answered with HTTP 400.
+    handler takes a Request and returns (status, JSON body or None); an exception
+    it raises goes to errors and is answered with HTTP 400.
     """
 
     def __init__(self, handler):

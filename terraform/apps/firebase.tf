@@ -1,7 +1,7 @@
 # The apps' Firebase resources, imported as they were set up in the Firebase
 # console. Deployments stay with the apps' repositories (`firebase deploy`):
 # Firestore and Storage rules, Hosting releases and Cloud Functions are not
-# managed here, so that the two never overwrite each other. Databases, buckets
+# managed here, so the two never overwrite each other. Databases, buckets
 # and Hosting sites can never be destroyed by Terraform.
 #
 # Not imported: Realtime Database (none), Analytics and Cloud Messaging (no

@@ -11,9 +11,9 @@ name: Flutter release
 # rebuilding them. The Google Play and App Store
 # jobs run once the app passes its store ID and the store variables are set.
 #
-# The caller can also run on workflow_dispatch, from a release's tag, to publish
-# that release's store builds again without building: to publish-track, on the
-# publish-platforms.
+# A caller that also runs on workflow_dispatch can publish a release's store
+# builds again without rebuilding: run it from the release's tag with
+# publish-track and publish-platforms.
 
 on:
   workflow_call:
@@ -505,8 +505,7 @@ jobs:
           path: .infra
           persist-credentials: false
           sparse-checkout: scripts
-      # From the release rather than the run's artifacts, so that the job can
-      # be re-run after the artifacts expire.
+      # From the release, so a re-run works after the run's artifacts expire.
       - if: ${{ needs.plan.outputs.mode == 'build' }}
         name: Download the App Bundle
         env:
@@ -549,7 +548,6 @@ jobs:
       push: ${{ steps.pack.outputs.push }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
-      # Only Flutter is needed.
       MISE_ENABLE_TOOLS: flutter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -692,8 +690,7 @@ jobs:
               exit 1
             fi
           fi
-          # The Xcode 26 altool can exit 0 after a failed upload, so its output
-          # decides as well.
+          # Xcode 26's altool can exit 0 after a failed upload; check its output too.
           API_PRIVATE_KEYS_DIR="$keys" xcrun altool --upload-package export/*.ipa \
             --platform ios --apple-id "$APPLE_APP_ID" --bundle-id "$BUNDLE_ID" \
             --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$VERSION" \
