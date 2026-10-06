@@ -468,14 +468,30 @@ def review_submissions(app_id):
 
 
 def withdraw(submission_id, app_id):
-    """Takes a submission that App Review has not started out of review."""
+    """Takes a submission that App Review has not started out of review and
+    waits until its versions can be edited again."""
+    items = call("GET", f"/v1/reviewSubmissions/{submission_id}/items", {
+        "include": "appStoreVersion",
+    })["data"]
+    version_ids = [
+        item["relationships"]["appStoreVersion"]["data"]["id"]
+        for item in items
+        if item["relationships"].get("appStoreVersion", {}).get("data")
+    ]
     call("PATCH", f"/v1/reviewSubmissions/{submission_id}", body={"data": {
         "type": "reviewSubmissions",
         "id": submission_id,
         "attributes": {"canceled": True},
     }})
     for _ in range(40):
-        if all(s["id"] != submission_id for s in review_submissions(app_id)):
+        gone = all(s["id"] != submission_id for s in review_submissions(app_id))
+        # App Store Connect makes the versions editable a little later.
+        if gone and all(
+            call("GET", f"/v1/appStoreVersions/{version_id}", {
+                "fields[appStoreVersions]": "appVersionState",
+            })["data"]["attributes"]["appVersionState"] in EDITABLE
+            for version_id in version_ids
+        ):
             print("Withdrew the version waiting for review; this release replaces it.")
             return
         time.sleep(15)
