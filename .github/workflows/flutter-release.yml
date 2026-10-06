@@ -106,6 +106,8 @@ jobs:
       ios: ${{ steps.version.outputs.ios }}
       tag: ${{ steps.version.outputs.tag }}
       version: ${{ steps.version.outputs.version }}
+      label: ${{ steps.version.outputs.label }}
+      number: ${{ steps.version.outputs.number }}
       build-number: ${{ steps.version.outputs.build-number }}
     steps:
       - id: version
@@ -241,6 +243,8 @@ jobs:
             echo "ios=$ios"
             echo "tag=$TAG"
             echo "version=$version"
+            echo "label=$label"
+            echo "number=$number"
             echo "build-number=$build_number"
           } >> "$GITHUB_OUTPUT"
           echo "$TAG: $mode ($channel, Google Play track $play_track), version $version, build $build_number" >> "$GITHUB_STEP_SUMMARY"
@@ -446,10 +450,51 @@ jobs:
             exit 1
           fi
           assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
-          for name in "${PREFIX}-${TAG}.aab" "${PREFIX}-${TAG}-web.zip"; do
-            if ! grep -qxF "$name" <<< "$assets"; then
-              echo "::error::$TAG has no $name; only a beta built by the release workflow can be promoted."
+          # A re-run finds the builds already renamed after the release.
+          for suffix in .aab -web.zip; do
+            if ! grep -qxF -e "${PREFIX}-${TAG}${suffix}" -e "${PREFIX}-${TAG%%-*}${suffix}" <<< "$assets"; then
+              echo "::error::$TAG has no ${PREFIX}-${TAG}${suffix}; only a beta built by the release workflow can be promoted."
               exit 1
+            fi
+          done
+
+  rename:
+    name: Rename the release
+    needs: [plan, promote]
+    if: ${{ needs.plan.outputs.manual != 'true' && needs.promote.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write # rename the release and its builds
+    steps:
+      - name: Drop the pre-release label from the names
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          LABEL: ${{ needs.plan.outputs.label }}
+          NUMBER: ${{ needs.plan.outputs.number }}
+        run: |
+          api=repos/$GITHUB_REPOSITORY/releases
+          id=$(gh api "$api/tags/$TAG" --jq .id)
+          # "App 1.2.0 beta 3" becomes "App 1.2.0", v1.2.0-beta.3 becomes v1.2.0.
+          title=$(gh api "$api/$id" --jq .name)
+          pattern="^(.*)${VERSION//./\\.}[ ._-]*${LABEL//./\\.}[ ._-]*${NUMBER}([^0-9].*)?$"
+          new=
+          shopt -s nocasematch
+          if [ -z "$title" ]; then
+            new=${TAG%%-*} # GitHub shows the tag as the title
+          elif [[ $title =~ $pattern ]]; then
+            new=${BASH_REMATCH[1]}$VERSION${BASH_REMATCH[2]}
+          fi
+          shopt -u nocasematch
+          if [ -n "$new" ]; then
+            gh api -X PATCH "$api/$id" -f name="$new" --silent
+          fi
+          # The tag keeps the label; the builds are named after the release.
+          gh api "$api/$id" --jq '.assets[] | "\(.id) \(.name)"' | while read -r asset name; do
+            if [[ $name == *-"$TAG"* ]]; then
+              gh api -X PATCH "$api/assets/$asset" -f name="${name/-"$TAG"/-"${TAG%%-*}"}" --silent
             fi
           done
 
@@ -750,7 +795,7 @@ jobs:
 
   pages:
     name: GitHub Pages
-    needs: [plan, publish, promote]
+    needs: [plan, publish, promote, rename]
     if: >-
       ${{ !cancelled() && inputs.pages && github.event.repository.has_pages
       && needs.plan.outputs.manual != 'true'
