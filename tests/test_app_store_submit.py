@@ -313,9 +313,10 @@ class AppStoreMock:
             return 200, {"data": {"type": "appStoreVersionLocalizations", "id": "l1",
                                   "attributes": {}}}
         if path == "/v1/reviewSubmissions" and method == "GET":
+            states = request.query["filter[state]"].split(",")
             return 200, {"data": [
                 {"type": "reviewSubmissions", "id": s, "attributes": {"state": v["state"]}}
-                for s, v in self.submissions.items()
+                for s, v in self.submissions.items() if v["state"] in states
             ]}
         if path == "/v1/reviewSubmissions" and method == "POST":
             self.submissions["rs-new"] = {"state": "READY_FOR_REVIEW", "items": []}
@@ -346,6 +347,13 @@ class AppStoreMock:
                                          "Version is not ready to be submitted yet, "
                                          "please try again later."}]}
             submission = self.submissions[match.group(1)]
+            if body["data"]["attributes"].get("canceled"):
+                assert submission["state"] == "WAITING_FOR_REVIEW", submission
+                submission["state"] = "COMPLETE"
+                for version_id in submission["items"]:
+                    self.versions[version_id]["state"] = "DEVELOPER_REJECTED"
+                return 200, {"data": {"type": "reviewSubmissions", "id": match.group(1),
+                                      "attributes": {"state": "CANCELING"}}}
             submission["state"] = "WAITING_FOR_REVIEW"
             for version_id in submission["items"]:
                 self.versions[version_id]["state"] = "WAITING_FOR_REVIEW"
@@ -443,13 +451,30 @@ class AppStoreSubmitTest(unittest.TestCase):
 
     def test_submission_in_review_blocks_a_new_one(self):
         mock = AppStoreMock(
-            submissions={"rs1": {"state": "WAITING_FOR_REVIEW", "items": []}},
+            submissions={"rs1": {"state": "IN_REVIEW", "items": []}},
         )
         result, api = self.submit(mock, "build", "prod", notes="x")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("A submission is already WAITING_FOR_REVIEW", result.stderr)
+        self.assertIn("A submission is already IN_REVIEW", result.stderr)
         self.assertNotIn("POST /v1/appStoreVersions", api.calls())
         self.assertNotIn("POST /v1/reviewSubmissions", api.calls())
+
+    def test_new_release_replaces_a_version_waiting_for_review(self):
+        versions = copy.deepcopy(LIVE)
+        versions["v-wait"] = {"version": "4.2.1", "state": "WAITING_FOR_REVIEW",
+                              "build": "b-old"}
+        mock = AppStoreMock(versions=versions, submissions={
+            "rs-wait": {"state": "WAITING_FOR_REVIEW", "items": ["v-wait"]},
+        })
+        result, api = self.submit(mock, "build", "prod", notes="Poprawki")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Withdrew the version waiting for review", result.stdout)
+        # The withdrawn version is reused for this one, with the new build.
+        self.assertNotIn("POST /v1/appStoreVersions", api.calls())
+        self.assertEqual(mock.versions["v-wait"]["version"], "4.3.0")
+        self.assertEqual(mock.versions["v-wait"]["build"], "b1")
+        self.assertEqual(mock.versions["v-wait"]["state"], "WAITING_FOR_REVIEW")
+        self.assertEqual(mock.submissions["rs-wait"]["state"], "COMPLETE")
 
     def test_beta_becomes_a_public_testflight_beta(self):
         mock = AppStoreMock(versions={
