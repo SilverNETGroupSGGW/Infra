@@ -1,7 +1,7 @@
 name: Flutter release
 
 # Reusable: builds a release of a Flutter app and publishes it to the stores
-# and Pages; the tag picks the testers (see README.md).
+# and Pages; a pre-release goes to open testing, a release to production.
 
 on:
   workflow_call:
@@ -31,12 +31,8 @@ on:
         description: API name of the Google Play open testing track; Google names it `beta`, and other names are closed tracks.
         type: string
         default: beta
-      play-alpha-track:
-        description: API name of the Google Play closed testing track that gets the alpha pre-releases.
-        type: string
-        default: alpha
       publish-track:
-        description: "Manual runs from a release's tag: the Google Play track to publish to; it also picks the iOS testers."
+        description: "Manual runs from a release's tag: `production` or the open testing track (play-beta-track)."
         type: string
       publish-platforms:
         description: "Manual runs: `all` (the default), `android` or `ios`."
@@ -99,7 +95,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
-      contents: read # check the version's other tags
+      contents: read # check the release's builds and the version's other tags
     outputs:
       mode: ${{ steps.version.outputs.mode }}
       manual: ${{ steps.version.outputs.manual }}
@@ -124,7 +120,7 @@ jobs:
           TRACK: ${{ inputs.publish-track }}
           PLATFORMS: ${{ inputs.publish-platforms }}
           BETA_TRACK: ${{ inputs.play-beta-track }}
-          ALPHA_TRACK: ${{ inputs.play-alpha-track }}
+          PREFIX: ${{ inputs.artifact-prefix }}
           GH_TOKEN: ${{ github.token }}
         run: |
           case "$EVENT/$REF_TYPE" in
@@ -138,23 +134,17 @@ jobs:
               exit 1
               ;;
           esac
-          # [v]X.Y.Z, or [v]X.Y.Z-<label><N> such as 1.2.0-beta.3 or 1.2.0-rc2.
+          # [v]X.Y.Z, or [v]X.Y.Z-<label><N> such as 1.2.0-beta.3 or 1.2.0-rc2;
+          # the label is free text, only N counts.
           semver='^v?(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-([0-9A-Za-z.-]*[A-Za-z.-])?([1-9][0-9]?))?$'
           if [[ ! $TAG =~ $semver ]] || ((BASH_REMATCH[1] > 2099 || BASH_REMATCH[6] > 98)); then
-            echo "::error::$TAG is not a version tag: X.Y.Z for a release, X.Y.Z-beta.N for a pre-release (optional leading v; X up to 2099, Y, Z up to 99, N from 1 to 98)."
+            echo "::error::$TAG is not a version tag: X.Y.Z, or X.Y.Z-beta.N for a pre-release (optional leading v; X up to 2099, Y, Z up to 99, N from 1 to 98)."
             exit 1
           fi
           version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           pre=${BASH_REMATCH[4]}
           number=${BASH_REMATCH[6]}
-          # flutter-pages.yml repeats the public labels.
           label=${BASH_REMATCH[5]%[.-]}
-          case "${label,,}" in
-            beta | rc) testers=beta ;;
-            alpha) testers=alpha ;;
-            internal) testers=internal ;;
-            *) testers= ;;
-          esac
           # A release (99) sorts after its pre-releases:
           # 1.2.3-beta.4 builds 1020304, 1.2.3 builds 1020399.
           build_number=$((BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 10000 + BASH_REMATCH[3] * 100 + ${BASH_REMATCH[6]:-99}))
@@ -165,15 +155,9 @@ jobs:
             case "$TRACK" in
               production) channel=prod ;;
               "$BETA_TRACK") channel=beta ;;
-              "$ALPHA_TRACK") channel=alpha ;;
-              internal) channel=internal ;;
-              "")
-                echo "::error::Pass the publish-track input."
-                exit 1
-                ;;
               *)
-                channel=beta ios=false
-                echo "::notice::iOS has no $TRACK track; publish to production, $BETA_TRACK, $ALPHA_TRACK or internal to publish on iOS."
+                echo "::error::publish-track is production or $BETA_TRACK, not '$TRACK'; publish to other tracks in the store consoles."
+                exit 1
                 ;;
             esac
             case "$PLATFORMS" in
@@ -190,39 +174,28 @@ jobs:
               exit 1
             fi
           else
-            case "$ACTION/$PRERELEASE/${pre:+pre}" in
-              published/true/pre)
-                if [ -z "$testers" ]; then
-                  echo "::error::$TAG has an unknown pre-release label: beta.N or rc.N for a public beta, alpha.N for a private test, internal.N for an internal test. Delete this release and publish it again with such a tag."
-                  exit 1
-                fi
-                mode=build channel=$testers
-                ;;
-              published/false/) mode=build channel=prod ;;
-              released/*/pre) mode=promote channel=prod ;;
-              released/*/)
-                # Published directly as a release: the published run builds it.
+            # The pre-release checkbox picks the testers, not the tag.
+            case "$ACTION/$PRERELEASE" in
+              published/true) mode=build channel=beta play_track=$BETA_TRACK ;;
+              published/false)
                 mode=skip channel=prod
-                echo "::notice::The published run of $TAG builds it. If that run failed because \"pre-release\" was ticked by mistake, delete the release (keep the tag) and publish it again."
+                echo "::notice::GitHub also sends \"released\" for a release; that run publishes $TAG."
                 ;;
-              published/true/)
-                echo "::error::A pre-release needs a pre-release tag such as $TAG-beta.1: delete this release (keep the tag) and publish it again, as a release or with a pre-release tag."
-                exit 1
-                ;;
-              published/false/pre)
-                echo "::error::$TAG is a pre-release tag: delete this release (keep the tag) and publish it again, as a pre-release or as a release tagged ${TAG%%-*}."
-                exit 1
+              released/*)
+                # Sent for a new release and for a pre-release turned into one;
+                # only the second has a beta's builds to promote.
+                channel=prod play_track=production
+                assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+                if grep -qxF -e "$PREFIX-$TAG.aab" -e "$PREFIX-${TAG%%-*}.aab" <<< "$assets"; then
+                  mode=promote
+                else
+                  mode=build
+                fi
                 ;;
               *)
                 echo "::error::Unexpected release action $ACTION."
                 exit 1
                 ;;
-            esac
-            case "$mode/$channel" in
-              build/beta) play_track=$BETA_TRACK ;;
-              build/alpha) play_track=$ALPHA_TRACK ;;
-              build/internal) play_track=internal ;;
-              *) play_track=production ;;
             esac
           fi
           # Pre-releases of a version with the same N share a build number.
@@ -232,7 +205,7 @@ jobs:
               gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$version-" --jq "$refs")
             for other in $others; do
               if [ "$other" != "$TAG" ] && [[ $other =~ $semver ]] && [ "${BASH_REMATCH[6]}" = "$number" ]; then
-                echo "::error::$other already has build number $build_number: the pre-releases of a version need different numbers (alpha.1, beta.2, beta.3). Delete this release and publish it again with a new tag."
+                echo "::error::$other already has build number $build_number: the pre-releases of a version need different numbers (beta.1, beta.2, rc.3). Delete this release and publish it again with a new tag."
                 exit 1
               fi
             done
@@ -464,7 +437,7 @@ jobs:
   rename:
     name: Rename the release
     needs: [plan, promote]
-    if: ${{ needs.plan.outputs.manual != 'true' && needs.promote.result == 'success' }}
+    if: ${{ needs.plan.outputs.manual != 'true' && needs.plan.outputs.number != '' && needs.promote.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -832,7 +805,6 @@ jobs:
     if: >-
       ${{ !cancelled() && inputs.pages && github.event.repository.has_pages
       && needs.plan.outputs.manual != 'true'
-      && (needs.plan.outputs.channel == 'prod' || needs.plan.outputs.channel == 'beta')
       && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
     permissions:
       contents: read # read the releases and their web builds
