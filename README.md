@@ -148,7 +148,7 @@ workflow only gets what it uses.
 | `android-package` | | Android application ID; turns on Google Play |
 | `android-keystore-path` | `android/app/key.jks` | Where the build reads the upload keystore, relative to `app-dir` |
 | `bundle-id`, `apple-app-id` | | iOS bundle ID and the app's numeric Apple ID (App Store Connect, App Information); `bundle-id` turns on the iOS build and App Store Connect |
-| `play-beta-track` | `beta` | API name of the open testing track; an app with a closed testing track named Beta from before open testing keeps it as `beta`, so its open testing track has another name, such as `openBeta` |
+| `play-beta-track` | `beta` | API name of the open testing track; Google names it `beta`, and custom names such as `openBeta` are closed testing tracks |
 | `play-alpha-track` | `alpha` | API name of the closed testing track that gets the private tests (alpha pre-releases) |
 | `publish-track`, `publish-platforms` | | Manual runs: where to publish the release's builds (below) |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |

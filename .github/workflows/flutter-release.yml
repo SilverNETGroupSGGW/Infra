@@ -28,7 +28,7 @@ on:
         description: The app's numeric Apple ID in App Store Connect (App Information), needed with bundle-id.
         type: string
       play-beta-track:
-        description: API name of the Google Play open testing track, e.g. `openBeta` if `beta` is an old closed track.
+        description: API name of the Google Play open testing track; Google names it `beta`, and other names are closed tracks.
         type: string
         default: beta
       play-alpha-track:
