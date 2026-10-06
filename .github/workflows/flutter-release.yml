@@ -1,18 +1,7 @@
 name: Flutter release
 
-# Reusable: build a GitHub release of a Flutter app, attach the builds to it and
-# publish them to Google Play, App Store Connect and GitHub Pages.
-#
-# Call it from a workflow that runs `on: release: types: [published, released]`
-# (see README.md). The tag sets the version: a pre-release tagged X.Y.Z-beta.N
-# is a public beta, a release tagged X.Y.Z goes to production (a leading "v" is
-# optional), and turning a beta into a release promotes the beta's builds
-# without rebuilding them. The Google Play and App Store jobs run once the app
-# passes its store ID and the store variables are set.
-#
-# The caller can also run on workflow_dispatch, from a release's tag, to publish
-# that release's store builds again without building: to publish-track, on the
-# publish-platforms.
+# Reusable: builds a release of a Flutter app and publishes it to the stores
+# and Pages; the tag picks the testers (see README.md).
 
 on:
   workflow_call:
@@ -39,11 +28,15 @@ on:
         description: The app's numeric Apple ID in App Store Connect (App Information), needed with bundle-id.
         type: string
       play-beta-track:
-        description: API name of the Google Play open testing track that gets the betas. An app that had a closed testing track named Beta before Play added open testing keeps that track as `beta`; its open testing track has another name, such as `openBeta`.
+        description: API name of the Google Play open testing track, e.g. `openBeta` if `beta` is an old closed track.
         type: string
         default: beta
+      play-alpha-track:
+        description: API name of the Google Play closed testing track that gets the alpha pre-releases.
+        type: string
+        default: alpha
       publish-track:
-        description: "Manual runs (workflow_dispatch, from a release's tag): the Google Play track to publish the release's build to, e.g. `internal`, `alpha`, the open testing track or `production`. On iOS, `production` submits the build for App Review and the open testing track makes it a public TestFlight beta; iOS has no other tracks."
+        description: "Manual runs from a release's tag: the Google Play track to publish to; it also picks the iOS testers."
         type: string
       publish-platforms:
         description: "Manual runs: `all` (the default), `android` or `ios`."
@@ -56,7 +49,7 @@ on:
         description: Deploy the web builds to GitHub Pages once Pages is enabled for the repository.
         type: boolean
       environment:
-        description: Deployment environment of the jobs that use signing or store credentials, e.g. one with required reviewers. Empty for none.
+        description: Environment of the jobs that use signing or store credentials; empty for none.
         type: string
       build-tools:
         description: mise tools that the Android and web builds install (MISE_ENABLE_TOOLS).
@@ -102,6 +95,8 @@ jobs:
     name: Check the release
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read # check the version's other tags
     outputs:
       mode: ${{ steps.version.outputs.mode }}
       manual: ${{ steps.version.outputs.manual }}
@@ -124,6 +119,8 @@ jobs:
           TRACK: ${{ inputs.publish-track }}
           PLATFORMS: ${{ inputs.publish-platforms }}
           BETA_TRACK: ${{ inputs.play-beta-track }}
+          ALPHA_TRACK: ${{ inputs.play-alpha-track }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           case "$EVENT/$REF_TYPE" in
             release/* | workflow_dispatch/tag) ;;
@@ -144,9 +141,17 @@ jobs:
           fi
           version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
           pre=${BASH_REMATCH[4]}
-          # Grows with every version and pre-release, and a release (99) sorts
-          # after its pre-releases: 1.2.3-beta.4 builds 1020304, 1.2.3 builds
-          # 1020399. A promoted beta keeps its build number.
+          number=${BASH_REMATCH[6]}
+          # flutter-pages.yml repeats the public labels.
+          label=${BASH_REMATCH[5]%[.-]}
+          case "${label,,}" in
+            beta | rc) testers=beta ;;
+            alpha) testers=alpha ;;
+            internal) testers=internal ;;
+            *) testers= ;;
+          esac
+          # A release (99) sorts after its pre-releases:
+          # 1.2.3-beta.4 builds 1020304, 1.2.3 builds 1020399.
           build_number=$((BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 10000 + BASH_REMATCH[3] * 100 + ${BASH_REMATCH[6]:-99}))
           manual=false android=true ios=true
           if [ "$EVENT" = workflow_dispatch ]; then
@@ -155,13 +160,15 @@ jobs:
             case "$TRACK" in
               production) channel=prod ;;
               "$BETA_TRACK") channel=beta ;;
+              "$ALPHA_TRACK") channel=alpha ;;
+              internal) channel=internal ;;
               "")
                 echo "::error::Pass the publish-track input."
                 exit 1
                 ;;
               *)
                 channel=beta ios=false
-                echo "::notice::iOS has no $TRACK track; publish to production or $BETA_TRACK to publish on iOS."
+                echo "::notice::iOS has no $TRACK track; publish to production, $BETA_TRACK, $ALPHA_TRACK or internal to publish on iOS."
                 ;;
             esac
             case "$PLATFORMS" in
@@ -179,7 +186,13 @@ jobs:
             fi
           else
             case "$ACTION/$PRERELEASE/${pre:+pre}" in
-              published/true/pre) mode=build channel=beta ;;
+              published/true/pre)
+                if [ -z "$testers" ]; then
+                  echo "::error::$TAG has an unknown pre-release label: beta.N or rc.N for a public beta, alpha.N for a private test, internal.N for an internal test. Delete this release and publish it again with such a tag."
+                  exit 1
+                fi
+                mode=build channel=$testers
+                ;;
               published/false/) mode=build channel=prod ;;
               released/*/pre) mode=promote channel=prod ;;
               released/*/)
@@ -200,7 +213,24 @@ jobs:
                 exit 1
                 ;;
             esac
-            if [ "$mode/$channel" = build/beta ]; then play_track=$BETA_TRACK; else play_track=production; fi
+            case "$mode/$channel" in
+              build/beta) play_track=$BETA_TRACK ;;
+              build/alpha) play_track=$ALPHA_TRACK ;;
+              build/internal) play_track=internal ;;
+              *) play_track=production ;;
+            esac
+          fi
+          # Pre-releases of a version with the same N share a build number.
+          if [ "$mode" = build ] && [ -n "$pre" ]; then
+            refs='.[].ref | ltrimstr("refs/tags/")'
+            others=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$version-" --jq "$refs" &&
+              gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$version-" --jq "$refs")
+            for other in $others; do
+              if [ "$other" != "$TAG" ] && [[ $other =~ $semver ]] && [ "${BASH_REMATCH[6]}" = "$number" ]; then
+                echo "::error::$other already has build number $build_number: the pre-releases of a version need different numbers (alpha.1, beta.2, beta.3). Delete this release and publish it again with a new tag."
+                exit 1
+              fi
+            done
           fi
           {
             echo "mode=$mode"
@@ -345,7 +375,7 @@ jobs:
           printf '\nversion: %s\n' "$VERSION" >> pubspec.yaml
       - name: Build
         env:
-          CHANNEL: ${{ needs.plan.outputs.channel }}
+          CHANNEL: ${{ needs.plan.outputs.channel == 'prod' && 'prod' || 'beta' }}
         run: mise run build:web --channel "$CHANNEL"
       - name: Zip the build
         env:
@@ -462,8 +492,7 @@ jobs:
           path: .infra
           persist-credentials: false
           sparse-checkout: scripts
-      # From the release rather than the run's artifacts, so that the job can
-      # be re-run after the artifacts expire.
+      # From the release, so a re-run works after the run's artifacts expire.
       - if: ${{ needs.plan.outputs.mode == 'build' }}
         name: Download the App Bundle
         env:
@@ -506,7 +535,6 @@ jobs:
       push: ${{ steps.pack.outputs.push }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
-      # Only Flutter is needed.
       MISE_ENABLE_TOOLS: flutter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -538,9 +566,8 @@ jobs:
         working-directory: ${{ inputs.app-dir }}
         env:
           TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        # Signed ad hoc, so the archive keeps its entitlements; the export signs
-        # it for distribution. Signing for real here would need a development
-        # certificate on the runner.
+        # Signed ad hoc, which keeps the entitlements without a development
+        # certificate; the export signs it for distribution.
         run: |
           mise x -- flutter build ios --release --config-only --no-codesign
           xcrun xcodebuild archive \
@@ -649,8 +676,7 @@ jobs:
               exit 1
             fi
           fi
-          # The Xcode 26 altool can exit 0 after a failed upload, so its output
-          # decides as well.
+          # Xcode 26's altool can exit 0 after a failed upload; check its output too.
           API_PRIVATE_KEYS_DIR="$keys" xcrun altool --upload-package export/*.ipa \
             --platform ios --apple-id "$APPLE_APP_ID" --bundle-id "$BUNDLE_ID" \
             --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$VERSION" \
@@ -662,8 +688,8 @@ jobs:
           fi
 
   app-store:
-    # Opens a beta's TestFlight build to public testers; submits a release or a
-    # promoted beta for App Review.
+    # Gives a pre-release's TestFlight build to its testers; submits a release or
+    # a promoted pre-release for App Review.
     name: App Store Connect
     needs: [plan, ios-upload, promote]
     if: >-
@@ -728,6 +754,7 @@ jobs:
     if: >-
       ${{ !cancelled() && inputs.pages && github.event.repository.has_pages
       && needs.plan.outputs.manual != 'true'
+      && (needs.plan.outputs.channel == 'prod' || needs.plan.outputs.channel == 'beta')
       && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
     permissions:
       contents: read # read the releases and their web builds

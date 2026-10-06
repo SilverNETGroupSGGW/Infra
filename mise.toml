@@ -1,5 +1,4 @@
 #:schema https://mise.jdx.dev/schema/mise.json
-# Tools and tasks for checking this repository.
 min_version = { hard = "2026.9.16", soft = "2026.10.0" }
 
 [settings]

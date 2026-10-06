@@ -87,15 +87,15 @@ run-name: >-
 
 on:
   release:
-    # published: build a release or pre-release; released: also promote a beta
-    # that was turned into a release.
+    # published: build a release or pre-release; released: also promote a
+    # pre-release that was turned into a release.
     types: [published, released]
   # Publishes a release's store builds again without building; run it from the
   # release's tag.
   workflow_dispatch:
     inputs:
       track:
-        description: Google Play track (iOS has production and the open testing track)
+        description: Google Play track (iOS has production, open and closed testing, internal)
         type: choice
         options: [beta, production, alpha, internal]
       platforms:
@@ -149,6 +149,7 @@ workflow only gets what it uses.
 | `android-keystore-path` | `android/app/key.jks` | Where the build reads the upload keystore, relative to `app-dir` |
 | `bundle-id`, `apple-app-id` | | iOS bundle ID and the app's numeric Apple ID (App Store Connect, App Information); `bundle-id` turns on the iOS build and App Store Connect |
 | `play-beta-track` | `beta` | API name of the open testing track; an app with a closed testing track named Beta from before open testing keeps it as `beta`, so its open testing track has another name, such as `openBeta` |
+| `play-alpha-track` | `alpha` | API name of the closed testing track that gets the private tests (alpha pre-releases) |
 | `publish-track`, `publish-platforms` | | Manual runs: where to publish the release's builds (below) |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |
 | `pages` | `false` | Deploy the web builds to GitHub Pages once Pages is enabled for the repository |
@@ -174,36 +175,49 @@ them.
 #### How a release flows
 
 - **Version:** the tag is the version: `X.Y.Z` for a release and
-  `X.Y.Z-beta.N` (any label ending in its number, such as `rc.N`) for a
-  pre-release, with or without a leading `v`. The builds get `X.Y.Z` as their
+  `X.Y.Z-<label>.N` for a pre-release, with or without a leading `v`. The
+  label picks the testers: `beta` or `rc` (`rc.N`, `rc2`) for a public beta,
+  `alpha` for a private test and `internal` for an internal test; other
+  labels stop the run before it builds anything. The builds get `X.Y.Z` as their
   version name and the build number (Android `versionCode`, iOS
   `CFBundleVersion`) `X·1000000 + Y·10000 + Z·100 + N`, where a release counts
   as `N` = 99: every new version or pre-release gets a higher number, and a
   release sorts after its pre-releases. `X` goes up to 2099, `Y` and `Z` up to
   99 and `N` from 1 to 98, and the pre-releases of a version need different
-  numbers (`beta.1`, `beta.2`, `rc.3`). The version in `pubspec.yaml` is only
+  numbers across all labels (`alpha.1`, `beta.2`, `rc.3`); the run checks the
+  version's other tags before building. The version in `pubspec.yaml` is only
   used by local builds.
 - **Beta:** publish a GitHub pre-release with a pre-release tag. The workflow
   builds signed per-ABI APKs, an App Bundle and the web app and attaches them
-  to the release. Google Play gets the bundle on the beta (open testing) track,
-  TestFlight gets the iOS build in a group with a public link and sends it to
-  Beta App Review (the link is in the run summary), and Pages serves it under
-  `/beta/`.
+  to the release. For a public beta (`beta`, `rc`), Google Play gets the
+  bundle on the open testing track, TestFlight gets the iOS build in a group
+  with a public link and sends it to Beta App Review (the link is in the run
+  summary), and Pages serves it under `/beta/`.
+- **Private and internal tests:** an `alpha` pre-release goes to the closed
+  testing track (`play-alpha-track`) and, after Beta App Review, to the
+  TestFlight group "Private beta", which has no public link; invite its
+  testers in App Store Connect. An `internal` pre-release goes to the
+  `internal` track and TestFlight's internal testers. Pages skips both, though
+  the GitHub release stays as visible as the repository. Builds are never
+  copied between tracks, but a Play tester gets the highest build number among
+  the tracks they joined, production included, and TestFlight's internal
+  groups with automatic distribution get every build.
 - **Production:** publish a release tagged `X.Y.Z`. Google Play gets it on the
   production track, App Review gets the iOS build (released once approved),
   and Pages serves it at the site root.
-- **Promotion:** untick "Set as a pre-release" on a tested beta. The same Play
-  build moves to production, the same TestFlight build goes to App Review, and
-  Pages serves it at the root without the BETA badge; nothing is rebuilt. The
-  store jobs check again that the release is still a release before changing
-  anything.
+- **Promotion:** untick "Set as a pre-release" on a tested pre-release. The
+  same Play build moves to production, the same TestFlight build goes to App
+  Review, and Pages serves it at the root without the BETA badge; nothing is
+  rebuilt. The store jobs check again that the release is still a release
+  before changing anything.
 - **Publishing again:** run the release workflow by hand from the release's
   tag ("Use workflow from", or
   `gh workflow run release.yml --ref v1.2.0-beta.3 -f track=production`). The
   builds that the release's run uploaded go to the chosen Google Play track
-  (`internal`, `alpha`, the open testing track or `production`) without being
-  rebuilt; on iOS, `production` submits the build for App Review and the open
-  testing track makes it a public TestFlight beta, and other tracks skip iOS.
+  (`internal`, the closed or open testing track, `production` or another)
+  without being rebuilt. iOS follows along: App Review for `production`, a
+  public or private TestFlight beta for the open or closed testing track, the
+  internal testers for `internal`; other tracks skip iOS.
   `platforms` limits it to `android` or `ios`. Pages is not changed.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
@@ -341,22 +355,22 @@ Also:
 [`terraform/apps`](terraform/apps/main.tf) describes the store release setup
 of every app with the [`terraform/app-release`](terraform/app-release) module:
 keyless Google Play sign-in in the app's Google Cloud project (its Firebase
-project), the service
-account's release access to the app in Play Console, the app repository's
-release environment (required reviewers, release tags allowed) and the
-repository variables the workflow reads. Secrets stay out of Terraform; set
-them with `gh secret set`. [`terraform/apps/firebase.tf`](terraform/apps/firebase.tf)
-also tracks the apps' Firebase projects, apps, Firestore databases, buckets
-and Hosting sites; their deployments (rules, Hosting releases, Functions) stay
-with the apps' `firebase deploy`.
+project), the service account's release access to the app in Play Console,
+the app repository's release environment (required reviewers, release tags
+allowed) and the repository variables the workflow reads. Secrets stay out of
+Terraform; set them with `gh secret set`.
+[`terraform/apps/firebase.tf`](terraform/apps/firebase.tf) also tracks the
+apps' Firebase projects, apps, Firestore databases, buckets and Hosting sites;
+their deployments (rules, Hosting releases, Functions) stay with the apps'
+`firebase deploy`.
 
-To add an app, add its project to `apps` of `terraform/bootstrap` and
-apply that (it gives the Terraform service account its roles there), then add
-a module block to `terraform/apps/main.tf` and merge it to `main`. The
+To add an app, add its project to `apps` of `terraform/bootstrap` and apply
+that (it gives the Terraform service account its roles there), then add a
+module block to `terraform/apps/main.tf` and merge it to `main`. The
 [Terraform workflow](.github/workflows/terraform.yml) plans the change and,
 once a reviewer of the `terraform` environment has read the plan in the run
-summary and approved the apply job, applies it. Settings that already exist get
-an `import` block, as the ones set by hand before.
+summary and approved the apply job, applies it. Settings that already exist,
+such as those set by hand before, get an `import` block.
 
 Pass `environment: release` to `flutter-release.yml` when the app has the
 release environment: its Google provider then only accepts tokens of this
@@ -369,12 +383,11 @@ and leave `environment` out of the workflow.
 The workflow signs in to Google Cloud as the Terraform service account
 (Workload Identity Federation, only `terraform.yml` from `main`) and to GitHub
 as the organization's Terraform GitHub App, and keeps the state in HCP
-Terraform's free tier. Its plan job runs without an approval; the apply job
-waits for a reviewer of the `terraform` environment. The repository is public,
-so the run summary lists only the changing resources, the logs show no plan
-or apply values, and the saved plan is encrypted between the two jobs. No
-Google Cloud billing account is linked to anything, so nothing can be billed.
-An administrator sets this up once:
+Terraform's free tier. The repository is public, so the run summary lists
+only the changing resources, the logs show no plan or apply values, and the
+saved plan is encrypted between the plan and apply jobs. No Google Cloud
+billing account is linked to anything, so nothing can be billed. An
+administrator sets this up once:
 
 1. Have the club's HCP Terraform organization `KN-Silver` (free plan; the
    bootstrap imports it) and a team API token for the workflow, stored as the
@@ -419,12 +432,12 @@ optional; the commented-out parts of `terraform/bootstrap` and
 ### Google Play
 
 The App Bundle is signed with the app's upload key (the `ANDROID_*` secrets).
-No Google key is stored: the workflow signs in with Workload Identity
-Federation, set up by `terraform/apps` together with the service account's
-Play Console access ("Release to testing tracks" and "Release to
-production, exclude devices, and use Play App Signing" for this app only).
-Store the upload key as secrets of the release environment (without
-`--env release` while the app has no environment):
+The workflow signs in with Workload Identity Federation, set up by
+`terraform/apps` together with the service account's Play Console access
+("Release to testing tracks" and "Release to production, exclude devices, and
+use Play App Signing" for this app only). Store the upload key as secrets of
+the release environment (without `--env release` while the app has no
+environment):
 
 ```sh
 base64 -w0 key.jks | gh secret set ANDROID_KEYSTORE_BASE64 --env release
@@ -433,11 +446,14 @@ gh secret set ANDROID_KEY_PASSWORD --env release
 gh secret set ANDROID_STORE_PASSWORD --env release
 ```
 
-Betas go to the beta (open testing) track and releases to production, all at
-once. Open testing needs its countries or regions chosen once in Play Console
-(Test and release → Open testing). A staged rollout started in Play Console
-stops the job until it is finished or halted. With managed publishing on,
-approved changes still wait for "Publish changes" in Play Console.
+Public betas go to the open testing track, private tests to the closed
+testing track, internal tests to the internal track and releases to
+production, all at once, each replacing the release on its track. Open
+testing needs its countries or regions chosen once in Play Console (Test and
+release → Open testing), closed testing its testers. A staged rollout started
+in Play Console stops the job until it is finished or halted. With managed
+publishing on, approved changes still wait for "Publish changes" in Play
+Console.
 
 ### App Store Connect
 
@@ -447,10 +463,10 @@ count ten times against the Actions minutes of a private repository.
 
 1. In App Store Connect, Users and Access → Integrations → App Store Connect
    API, create a team key with the Admin role (cloud signing needs it; the
-   Account Holder enables API access once). Download the `.p8` file; it can
-   only be downloaded once. Every team key reaches all apps of the team; a key
-   per app can still be revoked on its own. This step stays manual: the App
-   Store Connect API cannot create API keys.
+   Account Holder enables API access once). Download the `.p8` file, which
+   can only be downloaded once. Every team key reaches all apps of the team; a
+   key per app can still be revoked on its own. The App Store Connect API
+   cannot create API keys, so this step stays manual.
 2. Store the `.p8` contents as a secret of the release environment
    (`gh secret set APP_STORE_CONNECT_KEY --env release < AuthKey_KEYID.p8`;
    the repository without an environment), and pass its key ID, the issuer ID
@@ -467,19 +483,19 @@ count ten times against the Actions minutes of a private repository.
 4. Answer the age rating questions in App Information; App Store Connect asks
    new ones before it accepts updates.
 
-Betas go to TestFlight's public testers: the job adds the build to an external
-group with a public link (a new "Public beta" group if there is none), turns on
-"Automatically notify testers", sends it to Beta App Review and puts the public
-link in the run summary; testers get the build once Apple approves it.
+Public betas go to TestFlight's public testers: the job adds the build to an
+external group with a public link (a new "Public beta" group if there is
+none), turns on "Automatically notify testers", sends it to Beta App Review
+and puts the public link in the run summary; testers get the build once Apple
+approves it. Private tests go the same way to the group "Private beta", which
+has no public link. Internal tests only get "What to Test".
 TestFlight test information that is still empty (Beta App Review contact, beta
 description, feedback e-mail) is filled from the App Store review details and
-description, and the release description becomes "What to Test". Releases and
-promotions are submitted for App Review with the release description as "What's
-New" in every language, and released once approved. A released version accepts
-no new builds, so the beta after a release needs a higher version name. Apple
-reviews one build per version at a time: a beta published while the previous
-beta of its version is still in Beta App Review fails the App Store Connect
-job; re-run the job once that review is done.
+description, and the release description becomes "What to Test". A released
+version accepts no new builds, so the beta after a release needs a higher
+version name. Apple reviews one build per version at a time: a beta published
+while the previous beta of its version is still in Beta App Review fails the
+App Store Connect job; re-run the job once that review is done.
 
 ## Development
 

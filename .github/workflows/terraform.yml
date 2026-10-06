@@ -1,13 +1,7 @@
 name: Terraform
 
-# Applies terraform/apps (the apps' store release setup) from main. The plan
-# job runs on its own and lists the changing resources in the run summary; the
-# apply job runs in the `terraform` environment, whose reviewers approve it
-# after reading that list. The repository is public, so attribute values stay
-# out of the logs and the summary, and the saved plan travels encrypted with a
-# key derived per run from the GitHub App key. Only this workflow on main can
-# sign in as the Terraform service account (terraform/bootstrap). HCP
-# Terraform keeps the state.
+# Applies terraform/apps from main after a `terraform` environment approval.
+# The repository is public: values stay out of logs and the plan is encrypted.
 
 on:
   push:

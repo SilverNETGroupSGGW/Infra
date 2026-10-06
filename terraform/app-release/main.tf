@@ -1,8 +1,5 @@
-# The release setup of one app: a Google Cloud project that lets only the app's
-# release jobs act as its Google Play service account (Workload Identity
-# Federation, no key), the service account's access to the app in Play Console,
-# and the app repository's release environment and variables. Secrets stay out
-# of Terraform: set them with `gh secret set`.
+# One app's release setup: keyless Play sign-in, Play Console access, and the
+# repository's release environment and variables (secrets: `gh secret set`).
 
 data "github_repository" "app" {
   name = var.repository

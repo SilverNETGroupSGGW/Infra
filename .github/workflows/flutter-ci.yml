@@ -1,9 +1,6 @@
 name: Flutter CI
 
-# Reusable: lint, test and build a Flutter app on every push and pull request.
-# The calling repository provides the mise tasks of the task contract (see
-# README.md): check, build:apk, build:web, and codegen / build:ios if those
-# inputs are on.
+# Reusable: lint, test and build a Flutter app with its mise tasks (README.md).
 
 on:
   workflow_call:
@@ -27,7 +24,7 @@ on:
         type: boolean
         default: true
       ios:
-        description: Build the iOS app without code signing (`mise run build:ios`) on macOS. macOS minutes count ten times on private repositories.
+        description: Build the iOS app unsigned on macOS (`mise run build:ios`); macOS minutes count ten times.
         type: boolean
       macos-runner:
         description: Runner label of the iOS build.
@@ -41,8 +38,7 @@ on:
 permissions: {}
 
 env:
-  # The Android build uses the runner's preinstalled Android SDK (licenses
-  # accepted), so a mise android-sdk tool is never installed here.
+  # Use the runner's preinstalled Android SDK, which has its licenses accepted.
   MISE_DISABLE_TOOLS: android-sdk
 
 jobs:
@@ -75,7 +71,7 @@ jobs:
           APP_DIR: ${{ inputs.app-dir }}
         run: |
           mise run codegen
-          # Also new files that the code generator wrote but nobody committed.
+          # Also catch new generated files that nobody committed.
           git add --intent-to-add -- "$APP_DIR/lib"
           git diff --exit-code -- "$APP_DIR/lib"
 
@@ -146,7 +142,6 @@ jobs:
       contents: read # clone the repository
     env:
       DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
-      # Only Flutter is needed.
       MISE_ENABLE_TOOLS: flutter
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

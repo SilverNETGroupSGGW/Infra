@@ -1,12 +1,5 @@
-# One-time setup that lets the Terraform workflow manage the apps
-# (terraform/apps): the HCP Terraform workspace that keeps their state, the
-# infra project with the Terraform service account and its keyless sign-in from
-# this repository's `terraform` environment, its rights on the apps' projects
-# and in Play Console, and the `terraform` environment. An administrator of
-# HCP Terraform, the Google Cloud projects, Play Console and this repository
-# applies it once from their machine; see README.md, "Terraform in CI".
-#
-# Nothing here links a Google Cloud billing account, so nothing can be billed.
+# One-time setup for the Terraform workflow, applied by an administrator
+# (README.md, "Terraform in CI"). It links no billing account.
 
 terraform {
   required_version = ">= 1.11"
@@ -31,9 +24,7 @@ terraform {
   }
 }
 
-# Each app's Firebase project is its Google Cloud project; the release sign-in
-# lives there next to the app's other parts. Project IDs cannot change, so the
-# apps are keyed by name and the projects get the apps' names as display names.
+# Keyed by app name, which the projects also get (project IDs cannot change).
 variable "apps" {
   description = "The apps of terraform/apps: their Google Cloud project IDs and display names."
   type = map(object({
@@ -48,8 +39,7 @@ variable "apps" {
   }
 }
 
-# With a Google Cloud organization (silver.sggw.pl, later), new apps' projects
-# can be created by terraform/apps in an `apps` folder:
+# With an organization, terraform/apps can create projects in an `apps` folder:
 #
 # variable "org_id" {
 #   description = "Numeric ID of the Google Cloud organization (gcloud organizations list)."
@@ -219,10 +209,8 @@ resource "google_service_account_iam_member" "terraform_github" {
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.repository_id/${local.repository_id}"
 }
 
-# What terraform/apps manages in each app's project: the release sign-in
-# (terraform/app-release) and the app's Firebase resources. With the
-# organization, the same roles plus roles/resourcemanager.projectCreator go on
-# the apps folder for new apps.
+# Lets terraform/apps manage release sign-in and Firebase in each app project;
+# with an organization: on the apps folder, plus resourcemanager.projectCreator.
 resource "google_project_iam_member" "terraform" {
   for_each = {
     for pair in setproduct(keys(var.apps), [
@@ -265,7 +253,7 @@ resource "github_repository_environment_deployment_policy" "terraform_main" {
   branch_pattern = "main"
 }
 
-# Repository variables, so that the plan job reads them without an approval.
+# Repository variables, so the plan job reads them without an approval.
 resource "github_actions_variable" "terraform" {
   for_each = {
     TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER = google_iam_workload_identity_pool_provider.terraform.name

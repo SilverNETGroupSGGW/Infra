@@ -1,20 +1,16 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  // Covers the GitHub Actions (pinned by SHA), mise.toml tools and Terraform
-  // providers.
+  // GitHub Actions (pinned by SHA), mise.toml tools and Terraform providers.
   extends: ['config:recommended'],
-  // Refreshes the providers' hashes in the .terraform.lock.hcl files. Not
-  // automerged: it can also move providers within their constraints,
-  // including the Google Play one.
+  // Refreshes the .terraform.lock.hcl hashes; not automerged because it can
+  // also move providers, including the Google Play one.
   lockFileMaintenance: {
     enabled: true,
   },
   packageRules: [
     {
-      // Merged once CI (lint, Terraform validate, tests) passes and the
-      // release is three days old, so that a hijacked release is likely
-      // pulled before it lands; majors wait for a review. A merged Terraform
-      // change is still only planned until its apply is approved.
+      // Merged after CI passes and the release is three days old, so a hijacked
+      // release is likely pulled before it lands; majors wait for a review.
       matchUpdateTypes: ['minor', 'patch', 'pin', 'digest'],
       minimumReleaseAge: '3 days',
       automerge: true,
