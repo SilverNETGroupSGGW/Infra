@@ -68,6 +68,8 @@ class PlayMock:
                 assert body["track"] == track
                 self.puts.append(body)
                 return 200, body
+        if request.method == "DELETE" and path == f"{EDITS}/e1":
+            return 204, None
         if request.method == "GET" and path == f"{EDITS}/e1/listings":
             return 200, {"listings": [
                 {"language": language, "title": "App"} for language in self.images
@@ -300,8 +302,35 @@ class GooglePlayTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mock.puts[0]["releases"][0]["name"], "4.3.0")
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_listing_replaces_the_screenshots_alone(self):
+        root = self.screenshots({
+            "phone/en/01-schedule.png": b"en 1",
+            "phone/pl/01-schedule.png": b"pl 1",
+        })
+        mock = PlayMock(images={"en-US": {"phoneScreenshots": [b"old"]}, "pl-PL": {}})
+        result, api = self.run_play(
+            mock, MODE="listing", TRACK="", TAG="store-listing", SCREENSHOTS_DIR=root
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(mock.images["en-US"]["phoneScreenshots"], [b"en 1"])
+        self.assertEqual(mock.images["pl-PL"]["phoneScreenshots"], [b"pl 1"])
+        self.assertEqual(mock.puts, [])
+        self.assertEqual(api.calls()[-1], f"POST {EDITS}/e1:commit")
+
+    def test_listing_without_changes_drops_the_edit(self):
+        root = self.screenshots({"phone/en/01-schedule.png": b"same"})
+        mock = PlayMock(images={"en-US": {"phoneScreenshots": [b"same"]}})
+        result, api = self.run_play(
+            mock, MODE="listing", TRACK="", TAG="store-listing", SCREENSHOTS_DIR=root
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("up to date", result.stdout)
+        self.assertEqual(api.calls()[-1], f"DELETE {EDITS}/e1")
+
+    def test_listing_without_screenshots_fails(self):
+        result, api = self.run_play(PlayMock(), MODE="listing", TRACK="", TAG="x")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("screenshots-task", result.stderr)
 
     def screenshots(self, files):
         """A screenshots folder with {"<device>/<language>/<name>": contents}."""
@@ -346,3 +375,7 @@ if __name__ == "__main__":
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn(f"GET {EDITS}/e1/listings", api.calls())
         self.assertEqual(mock.images["en-US"]["phoneScreenshots"], [b"old"])
+
+
+if __name__ == "__main__":
+    unittest.main()
