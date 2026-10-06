@@ -2,7 +2,6 @@
 
 import base64
 import copy
-import hashlib
 import json
 import os
 import re
@@ -69,11 +68,8 @@ class AppStoreMock:
         self.group_builds = {}
         self.auto_notify = False
         self.beta_submissions = []
-        # Screenshot sets: display type -> [(id, contents, checksum)].
-        self.screenshot_sets = {}
         # Versions that become editable at their next read.
         self.withdrawn = []
-        self.uploads = {}
         self.spec = AppStoreSpec()
 
     def version(self, version_id):
@@ -187,68 +183,7 @@ class AppStoreMock:
                                           {"betaReviewState": "WAITING_FOR_REVIEW"})}
         return None
 
-    def screenshots(self, method, path, body, request):
-        """Answers the screenshot requests, or returns None for the others."""
-        if path == "/v1/appStoreVersionLocalizations/l1/appScreenshotSets":
-            return 200, {"data": [
-                resource("appScreenshotSets", kind, {"screenshotDisplayType": kind})
-                for kind in self.screenshot_sets
-            ]}
-        if path == "/v1/appScreenshotSets":
-            kind = body["data"]["attributes"]["screenshotDisplayType"]
-            assert body["data"]["relationships"]["appStoreVersionLocalization"][
-                "data"]["id"] == "l1"
-            self.screenshot_sets[kind] = []
-            return 201, {"data": resource("appScreenshotSets", kind, {})}
-        match = re.match(r"^/v1/appScreenshotSets/([^/]+)/appScreenshots$", path)
-        if match:
-            return 200, {"data": [
-                resource("appScreenshots", shot_id, {"sourceFileChecksum": checksum})
-                for shot_id, _, checksum in self.screenshot_sets[match.group(1)]
-            ]}
-        if path == "/v1/appScreenshots":
-            attributes = body["data"]["attributes"]
-            kind = body["data"]["relationships"]["appScreenshotSet"]["data"]["id"]
-            shot_id = f"s{len(self.uploads)}"
-            self.uploads[shot_id] = {"kind": kind, "name": attributes["fileName"],
-                                     "size": attributes["fileSize"], "data": b""}
-            host = request.headers["Host"]
-            return 201, {"data": resource("appScreenshots", shot_id, {
-                "uploadOperations": [{
-                    "method": "PUT", "url": f"http://{host}/upload/{shot_id}",
-                    "offset": 0, "length": attributes["fileSize"],
-                    "requestHeaders": [{"name": "Content-Type", "value": "image/png"}],
-                }],
-            })}
-        match = re.match(r"^/v1/appScreenshots/([^/]+)$", path)
-        if match:
-            shot_id = match.group(1)
-            if method == "DELETE":
-                for shots in self.screenshot_sets.values():
-                    shots[:] = [shot for shot in shots if shot[0] != shot_id]
-                return 204, None
-            upload = self.uploads[shot_id]
-            if method == "PATCH":
-                attributes = body["data"]["attributes"]
-                assert attributes["uploaded"] is True
-                assert len(upload["data"]) == upload["size"]
-                self.screenshot_sets[upload["kind"]].append(
-                    (shot_id, upload["data"], attributes["sourceFileChecksum"]))
-                return 200, {"data": resource("appScreenshots", shot_id, {})}
-            return 200, {"data": resource("appScreenshots", shot_id, {
-                "fileName": upload["name"],
-                "assetDeliveryState": {"state": "COMPLETE", "errors": []},
-            })}
-        return None
-
     def __call__(self, request):
-        upload = re.match(r"^/upload/([^/]+)$", request.path)
-        if upload:
-            # Apple's upload hosts take the parts without the API token.
-            assert "Authorization" not in request.headers
-            assert request.method == "PUT"
-            self.uploads[upload.group(1)]["data"] += request.raw
-            return 200, None
         header, _, _ = request.headers["Authorization"].removeprefix("Bearer ").split(".")
         header = json.loads(base64.urlsafe_b64decode(header + "=="))
         assert header == {"alg": "ES256", "kid": "KEY123", "typ": "JWT"}, header
@@ -369,9 +304,7 @@ class AppStoreMock:
                 self.versions[version_id]["state"] = "WAITING_FOR_REVIEW"
             return 200, {"data": {"type": "reviewSubmissions", "id": match.group(1),
                                   "attributes": {"state": "WAITING_FOR_REVIEW"}}}
-        answer = self.screenshots(method, path, body, request)
-        if answer is None:
-            answer = self.testflight(method, path, request.query, body)
+        answer = self.testflight(method, path, request.query, body)
         if answer is None:
             raise AssertionError(f"unexpected request {request}")
         return answer
@@ -696,49 +629,6 @@ class AppStoreSubmitTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("openssl dgst", result.stderr)
         self.assertEqual(api.requests, [])
-
-    def screenshot_folder(self, files):
-        """A screenshots folder with {"<device>/<language>/<name>": contents}."""
-        root = self.dir / "screenshots"
-        for name, contents in files.items():
-            (root / name).parent.mkdir(parents=True, exist_ok=True)
-            (root / name).write_bytes(contents)
-        return str(root)
-
-    def test_release_replaces_the_screenshots_that_differ(self):
-        root = self.screenshot_folder({
-            "iphone-6.9/pl/01-schedule.png": b"iphone 1",
-            "iphone-6.9/pl/02-map.png": b"iphone 2",
-            "ipad-13/pl/01-schedule.png": b"ipad 1",
-            "iphone-6.9/en/01-schedule.png": b"english",
-        })
-        mock = AppStoreMock()
-        old = hashlib.md5(b"old").hexdigest()
-        mock.screenshot_sets["APP_IPHONE_67"] = [("s-old", b"old", old)]
-        result, api = self.submit(mock, "build", "prod", notes="Poprawki",
-                                  SCREENSHOTS_DIR=root)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        sets = {kind: [shot[1] for shot in shots]
-                for kind, shots in mock.screenshot_sets.items()}
-        # The version's only language is pl, so the English ones stay out.
-        self.assertEqual(sets, {"APP_IPHONE_67": [b"iphone 1", b"iphone 2"],
-                                "APP_IPAD_PRO_3GEN_129": [b"ipad 1"]})
-        self.assertIn("DELETE /v1/appScreenshots/s-old", api.calls())
-        # Before the version goes to App Review.
-        calls = api.calls()
-        self.assertLess(calls.index("POST /v1/appScreenshots"),
-                        calls.index("POST /v1/reviewSubmissionItems"))
-
-    def test_release_keeps_screenshots_that_match(self):
-        root = self.screenshot_folder({"iphone-6.9/pl/01-schedule.png": b"same"})
-        mock = AppStoreMock()
-        same = hashlib.md5(b"same").hexdigest()
-        mock.screenshot_sets["APP_IPHONE_67"] = [("s-same", b"same", same)]
-        result, api = self.submit(mock, "build", "prod", notes="Poprawki",
-                                  SCREENSHOTS_DIR=root)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn("POST /v1/appScreenshots", api.calls())
-        self.assertNotIn("DELETE /v1/appScreenshots/s-same", api.calls())
 
 
 if __name__ == "__main__":

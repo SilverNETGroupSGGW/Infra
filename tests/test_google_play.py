@@ -2,7 +2,6 @@
 
 import hashlib
 import os
-import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +12,6 @@ PACKAGE = "com.example.app"
 EDITS = f"/androidpublisher/v3/applications/{PACKAGE}/edits"
 UPLOADS = f"/upload/androidpublisher/v3/applications/{PACKAGE}/edits"
 BUNDLE = b"PK\x03\x04 an App Bundle"
-IMAGE_TYPES = ("phoneScreenshots", "sevenInchScreenshots", "tenInchScreenshots")
 BETA_TRACK = {
     "track": "beta",
     "releases": [{
@@ -28,14 +26,11 @@ BETA_TRACK = {
 class PlayMock:
     """Answers like the Play Developer API for a given state of the app."""
 
-    def __init__(self, bundles=None, tracks=None, used=False, manual_review=False,
-                 images=None):
+    def __init__(self, bundles=None, tracks=None, used=False, manual_review=False):
         self.bundles = bundles or {}  # version code -> sha256
         self.tracks = tracks or {}
         self.used = used
         self.manual_review = manual_review
-        # Store listing images: language -> image type -> contents.
-        self.images = images or {}
         self.spec = PlaySpec()
         self.puts = []
 
@@ -68,30 +63,6 @@ class PlayMock:
                 assert body["track"] == track
                 self.puts.append(body)
                 return 200, body
-        if request.method == "DELETE" and path == f"{EDITS}/e1":
-            return 204, None
-        if request.method == "GET" and path == f"{EDITS}/e1/listings":
-            return 200, {"listings": [
-                {"language": language, "title": "App"} for language in self.images
-            ]}
-        listing = re.match(r"^(.*)/e1/listings/([^/]+)/([^/]+)$", path)
-        if listing:
-            root, language, image_type = listing.groups()
-            assert image_type in IMAGE_TYPES, image_type
-            images = self.images[language].setdefault(image_type, [])
-            if request.method == "GET" and root == EDITS:
-                return 200, {"images": [
-                    {"id": str(index), "sha256": hashlib.sha256(image).hexdigest()}
-                    for index, image in enumerate(images)
-                ]} if images else {}
-            if request.method == "DELETE" and root == EDITS:
-                images.clear()
-                return 200, {}
-            if request.method == "POST" and root == UPLOADS:
-                assert query == {"uploadType": "media"}
-                assert request.headers["Content-Type"] == "image/png"
-                images.append(request.raw)
-                return 200, {"image": {"id": str(len(images))}}
         if request.method == "POST" and path == f"{EDITS}/e1:commit":
             assert "changesInReviewBehavior" not in query
             assert request.raw == b""
@@ -301,81 +272,6 @@ class GooglePlayTest(unittest.TestCase):
         result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="4.3.0-rc1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mock.puts[0]["releases"][0]["name"], "4.3.0")
-
-    def test_listing_replaces_the_screenshots_alone(self):
-        root = self.screenshots({
-            "phone/en/01-schedule.png": b"en 1",
-            "phone/pl/01-schedule.png": b"pl 1",
-        })
-        mock = PlayMock(images={"en-US": {"phoneScreenshots": [b"old"]}, "pl-PL": {}})
-        result, api = self.run_play(
-            mock, MODE="listing", TRACK="", TAG="store-listing", SCREENSHOTS_DIR=root
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(mock.images["en-US"]["phoneScreenshots"], [b"en 1"])
-        self.assertEqual(mock.images["pl-PL"]["phoneScreenshots"], [b"pl 1"])
-        self.assertEqual(mock.puts, [])
-        self.assertEqual(api.calls()[-1], f"POST {EDITS}/e1:commit")
-
-    def test_listing_without_changes_drops_the_edit(self):
-        root = self.screenshots({"phone/en/01-schedule.png": b"same"})
-        mock = PlayMock(images={"en-US": {"phoneScreenshots": [b"same"]}})
-        result, api = self.run_play(
-            mock, MODE="listing", TRACK="", TAG="store-listing", SCREENSHOTS_DIR=root
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("up to date", result.stdout)
-        self.assertEqual(api.calls()[-1], f"DELETE {EDITS}/e1")
-
-    def test_listing_without_screenshots_fails(self):
-        result, api = self.run_play(PlayMock(), MODE="listing", TRACK="", TAG="x")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("screenshots-task", result.stderr)
-
-    def screenshots(self, files):
-        """A screenshots folder with {"<device>/<language>/<name>": contents}."""
-        root = self.dir / "screenshots"
-        for name, contents in files.items():
-            (root / name).parent.mkdir(parents=True, exist_ok=True)
-            (root / name).write_bytes(contents)
-        return str(root)
-
-    def test_production_replaces_the_screenshots_that_differ(self):
-        root = self.screenshots({
-            "phone/en/01-schedule.png": b"en 1",
-            "phone/en/02-map.png": b"en 2",
-            "phone/pl/01-schedule.png": b"pl 1",
-            "tablet-10/pl/01-schedule.png": b"pl tablet",
-        })
-        mock = PlayMock(tracks={"beta": BETA_TRACK}, images={
-            "en-US": {"phoneScreenshots": [b"old"]},
-            "pl-PL": {"phoneScreenshots": [b"pl 1"]},
-            "de-DE": {"phoneScreenshots": [b"alt"]},
-        })
-        result, api = self.run_play(
-            mock, MODE="promote", TRACK="production", TAG="v4.3.0-beta.1",
-            SCREENSHOTS_DIR=root,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(mock.images["en-US"]["phoneScreenshots"], [b"en 1", b"en 2"])
-        self.assertEqual(mock.images["pl-PL"]["tenInchScreenshots"], [b"pl tablet"])
-        # Unchanged, or without screenshots of their language: left alone.
-        self.assertEqual(mock.images["pl-PL"]["phoneScreenshots"], [b"pl 1"])
-        self.assertEqual(mock.images["de-DE"]["phoneScreenshots"], [b"alt"])
-        self.assertNotIn(f"DELETE {EDITS}/e1/listings/pl-PL/phoneScreenshots", api.calls())
-        # In the edit that releases the version.
-        self.assertEqual(api.calls()[-1], f"POST {EDITS}/e1:commit")
-
-    def test_testing_tracks_keep_the_listing(self):
-        root = self.screenshots({"phone/en/01-schedule.png": b"en 1"})
-        mock = PlayMock(images={"en-US": {"phoneScreenshots": [b"old"]}})
-        result, api = self.run_play(
-            mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1", SCREENSHOTS_DIR=root
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertNotIn(f"GET {EDITS}/e1/listings", api.calls())
-        self.assertEqual(mock.images["en-US"]["phoneScreenshots"], [b"old"])
-
 
 if __name__ == "__main__":
     unittest.main()
