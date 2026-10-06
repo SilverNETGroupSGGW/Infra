@@ -71,6 +71,8 @@ class AppStoreMock:
         self.beta_submissions = []
         # Screenshot sets: display type -> [(id, contents, checksum)].
         self.screenshot_sets = {}
+        # Versions that become editable at their next read.
+        self.withdrawn = []
         self.uploads = {}
         self.spec = AppStoreSpec()
 
@@ -303,6 +305,11 @@ class AppStoreMock:
                 version["version"] = attributes.get("versionString", version["version"])
                 return 200, {"data": self.version(version_id)}
             self.polls += 1
+            if version_id in self.withdrawn:
+                if version.get("read_once"):
+                    version["state"] = "DEVELOPER_REJECTED"
+                    self.withdrawn.remove(version_id)
+                version["read_once"] = True
             state = version["state"]
             if self.slow_ready and self.polls < 3:
                 state = "PREPARE_FOR_SUBMISSION"
@@ -351,7 +358,10 @@ class AppStoreMock:
                 assert submission["state"] == "WAITING_FOR_REVIEW", submission
                 submission["state"] = "COMPLETE"
                 for version_id in submission["items"]:
-                    self.versions[version_id]["state"] = "DEVELOPER_REJECTED"
+                    # Editable only after the submission is gone, as in App
+                    # Store Connect.
+                    self.versions[version_id]["state"] = "WAITING_FOR_REVIEW"
+                    self.withdrawn.append(version_id)
                 return 200, {"data": {"type": "reviewSubmissions", "id": match.group(1),
                                       "attributes": {"state": "CANCELING"}}}
             submission["state"] = "WAITING_FOR_REVIEW"
