@@ -50,7 +50,7 @@ class MockApi:
                 if body is not None:
                     self.wfile.write(json.dumps(body).encode())
 
-            do_GET = do_POST = do_PUT = do_PATCH = handle_request
+            do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = handle_request
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"

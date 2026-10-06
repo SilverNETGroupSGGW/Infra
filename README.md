@@ -11,6 +11,7 @@ Infrastructure of SilverNETGroupSGGW:
 | --- | --- |
 | [`flutter-ci.yml`](.github/workflows/flutter-ci.yml) | Lints and tests the app, checks generated code, builds the release APKs and the web app, optionally the iOS app |
 | [`flutter-release.yml`](.github/workflows/flutter-release.yml) | Builds a GitHub release, attaches the builds to it and publishes them to the stores and Pages; promotes a tested beta without rebuilding it |
+| [`flutter-screenshots.yml`](.github/workflows/flutter-screenshots.yml) | Renders the store screenshots with the app's mise tasks: Android on Linux, iOS on macOS |
 | [`flutter-pages.yml`](.github/workflows/flutter-pages.yml) | Serves the newest release's web build at the site root and the newest build of any kind, usually a beta, under `/beta/` |
 
 Each app keeps short caller workflows and implements a few `mise` tasks (the
@@ -153,6 +154,7 @@ workflow only gets what it uses.
 | `publish-track`, `publish-platforms` | | Manual runs: where to publish the release's builds (below) |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |
 | `pages` | `false` | Deploy the web builds to GitHub Pages once Pages is enabled for the repository |
+| `screenshots-task` | | Prefix of the mise tasks that render the store screenshots (below); empty for none |
 | `environment` | | Environment of the jobs that use signing or store credentials, e.g. one with required reviewers |
 | `build-tools` | `flutter,java` | mise tools the Android and web builds install |
 | `macos-runner`, `xcode-version`, `mise-version` | `macos-26`, `26.6`, newest release | |
@@ -219,6 +221,15 @@ them.
   public or private TestFlight beta for the open or closed testing track, the
   internal testers for `internal`; other tracks skip iOS.
   `platforms` limits it to `android` or `ios`. Pages is not changed.
+- **Screenshots:** with `screenshots-task`, production releases and
+  promotions run the app's `<task>:android` (Linux, with Noto Color Emoji)
+  and `<task>:ios` (macOS, with the San Francisco font) mise tasks, which
+  write `<app-dir>/build/screenshots/<platform>/<device>/<language>/*.png`.
+  Every listing language (`en-US`, or else `en`) gets its folder, in file
+  name order, where it differs from the store: Google Play's listing for the
+  devices `phone`, `tablet-7` and `tablet-10`, and the App Store version for
+  `iphone-6.9` (the required large iPhone size, 1320×2868) and `ipad-13`
+  (2064×2752). Testing tracks keep the listing.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
   language).

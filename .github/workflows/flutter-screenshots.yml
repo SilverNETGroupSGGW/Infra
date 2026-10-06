@@ -1,0 +1,69 @@
+name: Flutter store screenshots
+
+# Reusable: runs the app's mise tasks <task>:android (on Linux, with Noto Color
+# Emoji) and <task>:ios (on macOS, with the system fonts), which render
+# <app-dir>/build/screenshots/<platform>/<device>/<language>/*.png; uploads
+# them as the artifacts screenshots-android and screenshots-ios.
+
+on:
+  workflow_call:
+    inputs:
+      app-dir:
+        description: Directory of the Flutter app, relative to the repository root.
+        type: string
+        default: .
+      task:
+        description: Prefix of the app's mise tasks that render the screenshots.
+        type: string
+        default: screenshots
+      platforms:
+        description: "`all` (the default), `android` or `ios`."
+        type: string
+        default: all
+      mise-version:
+        description: The mise version to install; empty (the default) installs the newest release.
+        type: string
+      macos-runner:
+        description: Runner label of the iOS job.
+        type: string
+        default: macos-26
+
+permissions: {}
+
+jobs:
+  render:
+    name: Render (${{ matrix.platform }})
+    strategy:
+      matrix:
+        platform: [android, ios]
+        exclude:
+          - platform: ${{ inputs.platforms == 'android' && 'ios' || inputs.platforms == 'ios' && 'android' || 'none' }}
+    runs-on: ${{ matrix.platform == 'ios' && inputs.macos-runner || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    permissions:
+      contents: read # clone the repository
+    env:
+      MISE_ENABLE_TOOLS: flutter
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - if: ${{ matrix.platform == 'android' }}
+        name: Install the Android emoji font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-color-emoji
+      - uses: jdx/mise-action@7a4e45a543138629540c9a1616d08632b893e492 # v5.0.1
+        with:
+          version: ${{ inputs.mise-version }}
+          cache: false
+      - name: Render
+        env:
+          TASK: ${{ inputs.task }}:${{ matrix.platform }}
+        run: mise run "$TASK"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screenshots-${{ matrix.platform }}
+          path: ${{ inputs.app-dir }}/build/screenshots/${{ matrix.platform }}/
+          if-no-files-found: error
+          retention-days: 7

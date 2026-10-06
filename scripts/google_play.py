@@ -8,6 +8,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 ROOT = os.environ.get("PLAY_API", "https://androidpublisher.googleapis.com")
 PACKAGE = os.environ["PACKAGE_NAME"]
@@ -17,6 +18,12 @@ UPLOAD_API = f"{ROOT}/upload/androidpublisher/v3/applications/{PACKAGE}"
 NOTES_LIMIT = 500
 TRACK = os.environ["TRACK"]
 BETA_TRACK = os.environ["BETA_TRACK"]
+# Screenshot folders (SCREENSHOTS_DIR/<device>/<language>/*.png) by image type.
+SCREENSHOT_TYPES = {
+    "phone": "phoneScreenshots",
+    "tablet-7": "sevenInchScreenshots",
+    "tablet-10": "tenInchScreenshots",
+}
 
 
 class ApiError(Exception):
@@ -109,6 +116,39 @@ def upload(edit, version_code):
         )
 
 
+def screenshot_folder(device, language):
+    """The folder for a listing language: en-US, else en; None if neither."""
+    root = Path(os.environ["SCREENSHOTS_DIR"]) / device
+    for name in (language, language.split("-")[0]):
+        if (root / name).is_dir():
+            return root / name
+    return None
+
+
+def update_screenshots(edit):
+    """Replaces the listings' screenshots that differ from SCREENSHOTS_DIR."""
+    listings = call("GET", f"{API}/edits/{edit}/listings").get("listings", [])
+    for language in sorted(listing["language"] for listing in listings):
+        for device, image_type in SCREENSHOT_TYPES.items():
+            folder = screenshot_folder(device, language)
+            files = sorted(folder.glob("*.png")) if folder else []
+            if not files:
+                continue
+            images = [file.read_bytes() for file in files]
+            url = f"{API}/edits/{edit}/listings/{language}/{image_type}"
+            current = call("GET", url).get("images", [])
+            if [image.get("sha256") for image in current] == [
+                hashlib.sha256(image).hexdigest() for image in images
+            ]:
+                continue
+            call("DELETE", url)
+            for image in images:
+                call("POST", f"{UPLOAD_API}/edits/{edit}/listings/{language}/"
+                     f"{image_type}?uploadType=media", data=image,
+                     content_type="image/png")
+            print(f"Replaced the {language} {image_type} with {folder}.")
+
+
 def main():
     mode = os.environ["MODE"]
     tag = os.environ["TAG"]
@@ -148,6 +188,9 @@ def main():
             {"language": os.environ["NOTES_LANGUAGE"], "text": notes}
         ]
     check_no_staged_rollout(edit, track)
+    # The listing goes with production; testers see the same one.
+    if track == "production" and os.environ.get("SCREENSHOTS_DIR"):
+        update_screenshots(edit)
     call(
         "PUT",
         f"{API}/edits/{edit}/tracks/{track}",

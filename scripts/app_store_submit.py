@@ -2,6 +2,7 @@
 Run by flutter-release.yml with its settings in environment variables."""
 
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -11,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 
 API = os.environ.get("ASC_API", "https://api.appstoreconnect.apple.com")
 EDITABLE = {
@@ -41,6 +43,12 @@ DEMO_ACCOUNT = ("demoAccountRequired", "demoAccountName", "demoAccountPassword")
 PUBLIC_GROUP = "Public beta"
 # Testers invited by e-mail in App Store Connect.
 PRIVATE_GROUP = "Private beta"
+# Screenshot folders (SCREENSHOTS_DIR/<device>/<language>/*.png) by display
+# type; the API files the 6.9" iPhone screenshots under APP_IPHONE_67.
+SCREENSHOT_TYPES = {
+    "iphone-6.9": "APP_IPHONE_67",
+    "ipad-13": "APP_IPAD_PRO_3GEN_129",
+}
 
 
 def b64url(data):
@@ -509,6 +517,113 @@ def open_submission(app_id):
     return submissions[0]["id"], versions
 
 
+def screenshot_folder(device, locale):
+    """The folder for a locale: en-US, else en; None if neither."""
+    root = Path(os.environ["SCREENSHOTS_DIR"]) / device
+    for name in (locale, locale.split("-")[0]):
+        if (root / name).is_dir():
+            return root / name
+    return None
+
+
+def upload_screenshot(set_id, file):
+    """Uploads a screenshot to the end of the set and returns its ID."""
+    data = file.read_bytes()
+    screenshot = call("POST", "/v1/appScreenshots", body={"data": {
+        "type": "appScreenshots",
+        "attributes": {"fileName": file.name, "fileSize": len(data)},
+        "relationships": {"appScreenshotSet": {"data": {
+            "type": "appScreenshotSets", "id": set_id,
+        }}},
+    }})["data"]
+    for operation in screenshot["attributes"]["uploadOperations"]:
+        start = operation["offset"]
+        request = urllib.request.Request(
+            operation["url"],
+            data=data[start : start + operation["length"]],
+            method=operation["method"],
+            headers={h["name"]: h["value"] for h in operation["requestHeaders"] or []},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300):
+                pass
+        except urllib.error.HTTPError as error:
+            raise ApiError(error.code, error.read().decode(errors="replace")) from None
+    call("PATCH", f"/v1/appScreenshots/{screenshot['id']}", body={"data": {
+        "type": "appScreenshots",
+        "id": screenshot["id"],
+        "attributes": {
+            "uploaded": True,
+            "sourceFileChecksum": hashlib.md5(data).hexdigest(),
+        },
+    }})
+    return screenshot["id"]
+
+
+def wait_for_screenshots(screenshot_ids):
+    """Waits up to 10 minutes for App Store Connect to process the uploads."""
+    for screenshot_id in screenshot_ids:
+        for _ in range(40):
+            state = call("GET", f"/v1/appScreenshots/{screenshot_id}", {
+                "fields[appScreenshots]": "fileName,assetDeliveryState",
+            })["data"]["attributes"]
+            delivery = state["assetDeliveryState"] or {}
+            if delivery.get("state") == "COMPLETE":
+                break
+            if delivery.get("state") == "FAILED":
+                sys.exit(f"Screenshot {state['fileName']} failed: {delivery.get('errors')}")
+            time.sleep(15)
+        else:
+            sys.exit(f"Screenshot {state['fileName']} was not processed in 10 minutes.")
+
+
+def update_screenshots(version_id):
+    """Replaces the version's screenshot sets that differ from SCREENSHOTS_DIR."""
+    localizations = call(
+        "GET",
+        f"/v1/appStoreVersions/{version_id}/appStoreVersionLocalizations",
+        {"fields[appStoreVersionLocalizations]": "locale", "limit": "200"},
+    )["data"]
+    uploaded = []
+    for localization in sorted(localizations, key=lambda l: l["attributes"]["locale"]):
+        locale = localization["attributes"]["locale"]
+        sets = call(
+            "GET",
+            f"/v1/appStoreVersionLocalizations/{localization['id']}/appScreenshotSets",
+            {"fields[appScreenshotSets]": "screenshotDisplayType", "limit": "50"},
+        )["data"]
+        for device, display_type in SCREENSHOT_TYPES.items():
+            folder = screenshot_folder(device, locale)
+            files = sorted(folder.glob("*.png")) if folder else []
+            if not files:
+                continue
+            checksums = [hashlib.md5(file.read_bytes()).hexdigest() for file in files]
+            screenshot_set = next((
+                s for s in sets
+                if s["attributes"]["screenshotDisplayType"] == display_type
+            ), None)
+            if screenshot_set:
+                current = call(
+                    "GET", f"/v1/appScreenshotSets/{screenshot_set['id']}/appScreenshots",
+                    {"fields[appScreenshots]": "sourceFileChecksum", "limit": "10"},
+                )["data"]
+                if [c["attributes"]["sourceFileChecksum"] for c in current] == checksums:
+                    continue
+                for screenshot in current:
+                    call("DELETE", f"/v1/appScreenshots/{screenshot['id']}")
+            else:
+                screenshot_set = call("POST", "/v1/appScreenshotSets", body={"data": {
+                    "type": "appScreenshotSets",
+                    "attributes": {"screenshotDisplayType": display_type},
+                    "relationships": {"appStoreVersionLocalization": {"data": {
+                        "type": "appStoreVersionLocalizations", "id": localization["id"],
+                    }}},
+                }})["data"]
+            uploaded += [upload_screenshot(screenshot_set["id"], f) for f in files]
+            print(f"Replaced the {locale} {display_type} screenshots with {folder}.")
+    wait_for_screenshots(uploaded)
+
+
 def main():
     bundle_id = os.environ["BUNDLE_ID"]
     version = os.environ["VERSION"]
@@ -600,6 +715,9 @@ def main():
                      "id": localization["id"],
                      "attributes": {"whatsNew": notes},
                  }})
+
+    if os.environ.get("SCREENSHOTS_DIR"):
+        update_screenshots(version_id)
 
     if submission_id is None:
         submission_id = call("POST", "/v1/reviewSubmissions", body={"data": {
