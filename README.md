@@ -87,15 +87,15 @@ run-name: >-
 
 on:
   release:
-    # published: build a release or pre-release; released: also promote a beta
-    # that was turned into a release.
+    # published: build a release or pre-release; released: also promote a
+    # pre-release that was turned into a release.
     types: [published, released]
   # Publishes a release's store builds again without building; run it from the
   # release's tag.
   workflow_dispatch:
     inputs:
       track:
-        description: Google Play track (iOS has production and the open testing track)
+        description: Google Play track (iOS has production, open and closed testing, internal)
         type: choice
         options: [beta, production, alpha, internal]
       platforms:
@@ -149,6 +149,7 @@ workflow only gets what it uses.
 | `android-keystore-path` | `android/app/key.jks` | Where the build reads the upload keystore, relative to `app-dir` |
 | `bundle-id`, `apple-app-id` | | iOS bundle ID and the app's numeric Apple ID (App Store Connect, App Information); `bundle-id` turns on the iOS build and App Store Connect |
 | `play-beta-track` | `beta` | API name of the open testing track; an app with a closed testing track named Beta from before open testing keeps it as `beta`, so its open testing track has another name, such as `openBeta` |
+| `play-alpha-track` | `alpha` | API name of the closed testing track that gets the private tests (alpha pre-releases) |
 | `publish-track`, `publish-platforms` | | Manual runs: where to publish the release's builds (below) |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |
 | `pages` | `false` | Deploy the web builds to GitHub Pages once Pages is enabled for the repository |
@@ -174,36 +175,50 @@ them.
 #### How a release flows
 
 - **Version:** the tag is the version: `X.Y.Z` for a release and
-  `X.Y.Z-beta.N` (any label ending in its number, such as `rc.N`) for a
-  pre-release, with or without a leading `v`. The builds get `X.Y.Z` as their
+  `X.Y.Z-<label>.N` for a pre-release, with or without a leading `v`. The
+  label picks the testers: `beta` or `rc` (`rc.N`, `rc2`) for a public beta,
+  `alpha` for a private test and `internal` for an internal test; other
+  labels stop the run before it builds anything. The builds get `X.Y.Z` as their
   version name and the build number (Android `versionCode`, iOS
   `CFBundleVersion`) `X·1000000 + Y·10000 + Z·100 + N`, where a release counts
   as `N` = 99: every new version or pre-release gets a higher number, and a
   release sorts after its pre-releases. `X` goes up to 2099, `Y` and `Z` up to
   99 and `N` from 1 to 98, and the pre-releases of a version need different
-  numbers (`beta.1`, `beta.2`, `rc.3`). The version in `pubspec.yaml` is only
+  numbers across all labels (`alpha.1`, `beta.2`, `rc.3`); the run checks the
+  version's other tags before building. The version in `pubspec.yaml` is only
   used by local builds.
 - **Beta:** publish a GitHub pre-release with a pre-release tag. The workflow
   builds signed per-ABI APKs, an App Bundle and the web app and attaches them
-  to the release. Google Play gets the bundle on the beta (open testing) track,
-  TestFlight gets the iOS build in a group with a public link and sends it to
-  Beta App Review (the link is in the run summary), and Pages serves it under
-  `/beta/`.
+  to the release. For a public beta (`beta`, `rc`), Google Play gets the
+  bundle on the open testing track, TestFlight gets the iOS build in a group
+  with a public link and sends it to Beta App Review (the link is in the run
+  summary), and Pages serves it under `/beta/`. Every new beta replaces the
+  previous one for its testers.
+- **Private and internal tests:** an `alpha` pre-release goes to the closed
+  testing track (`play-alpha-track`) and to the TestFlight group "Private
+  beta" (created without a public link; invite its testers in App Store
+  Connect) after Beta App Review. An `internal` pre-release goes to the
+  `internal` track and stays with TestFlight's internal testers. Pages skips
+  both, but the GitHub release and its builds are as visible as the
+  repository. A tester of several tracks gets the highest build number among
+  them, so a newer beta also reaches the testers of an older alpha.
 - **Production:** publish a release tagged `X.Y.Z`. Google Play gets it on the
   production track, App Review gets the iOS build (released once approved),
   and Pages serves it at the site root.
-- **Promotion:** untick "Set as a pre-release" on a tested beta. The same Play
-  build moves to production, the same TestFlight build goes to App Review, and
-  Pages serves it at the root without the BETA badge; nothing is rebuilt. The
-  store jobs check again that the release is still a release before changing
-  anything.
+- **Promotion:** untick "Set as a pre-release" on a tested pre-release. The
+  same Play build moves to production, the same TestFlight build goes to App
+  Review, and Pages serves it at the root without the BETA badge; nothing is
+  rebuilt. The store jobs check again that the release is still a release
+  before changing anything.
 - **Publishing again:** run the release workflow by hand from the release's
   tag ("Use workflow from", or
   `gh workflow run release.yml --ref v1.2.0-beta.3 -f track=production`). The
   builds that the release's run uploaded go to the chosen Google Play track
-  (`internal`, `alpha`, the open testing track or `production`) without being
-  rebuilt; on iOS, `production` submits the build for App Review and the open
-  testing track makes it a public TestFlight beta, and other tracks skip iOS.
+  (`internal`, the closed or open testing track, `production` or another
+  track) without being rebuilt; on iOS, `production` submits the build for App
+  Review, the open and closed testing tracks make it a public or private
+  TestFlight beta, `internal` leaves it to the internal testers, and other
+  tracks skip iOS.
   `platforms` limits it to `android` or `ios`. Pages is not changed.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
@@ -433,11 +448,14 @@ gh secret set ANDROID_KEY_PASSWORD --env release
 gh secret set ANDROID_STORE_PASSWORD --env release
 ```
 
-Betas go to the beta (open testing) track and releases to production, all at
-once. Open testing needs its countries or regions chosen once in Play Console
-(Test and release → Open testing). A staged rollout started in Play Console
-stops the job until it is finished or halted. With managed publishing on,
-approved changes still wait for "Publish changes" in Play Console.
+Public betas go to the open testing track, private tests to the closed
+testing track, internal tests to the internal track and releases to
+production, all at once. Each upload replaces the release on its track. Open
+testing needs its countries or regions chosen once in Play Console (Test and
+release → Open testing), closed testing its testers. A staged rollout started
+in Play Console stops the job until it is finished or halted. With managed
+publishing on, approved changes still wait for "Publish changes" in Play
+Console.
 
 ### App Store Connect
 
@@ -467,10 +485,12 @@ count ten times against the Actions minutes of a private repository.
 4. Answer the age rating questions in App Information; App Store Connect asks
    new ones before it accepts updates.
 
-Betas go to TestFlight's public testers: the job adds the build to an external
+Public betas go to TestFlight's public testers: the job adds the build to an external
 group with a public link (a new "Public beta" group if there is none), turns on
 "Automatically notify testers", sends it to Beta App Review and puts the public
 link in the run summary; testers get the build once Apple approves it.
+Private tests go the same way to the group "Private beta", which has no public
+link, and internal tests only get "What to Test" for the internal testers.
 TestFlight test information that is still empty (Beta App Review contact, beta
 description, feedback e-mail) is filled from the App Store review details and
 description, and the release description becomes "What to Test". Releases and

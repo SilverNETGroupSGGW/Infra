@@ -1,7 +1,8 @@
 name: Flutter web on GitHub Pages
 
 # Reusable: serve the newest release's web build at the site root and the
-# newest release of any kind, usually a pre-release, under /beta/. It uses the
+# newest public release of any kind, usually a beta, under /beta/; alpha and
+# internal pre-releases (private and internal tests) are left out. It uses the
 # <prefix>-<tag>-web.zip assets that flutter-release.yml attaches to the
 # releases, and drops the BETA badge (see README.md, "Task contract") from the
 # root. flutter-release.yml calls it; call it from a workflow_dispatch workflow
@@ -37,9 +38,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: |
-          # Releases with a web build, newest first, as "<tag> <prerelease>".
+          # Public releases with a web build, newest first, as "<tag> <prerelease>":
+          # releases and the pre-releases that flutter-release.yml makes public
+          # betas (labels beta and rc).
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases" --jq '.[]
             | select((.draft | not) and any(.assets[]; .name | endswith("-web.zip")))
+            | select((.prerelease | not) or (.tag_name | test("-(beta|rc)[.-]?[1-9][0-9]?$"; "i")))
             | "\(.tag_name) \(.prerelease)"' > releases.txt
           beta=$(awk 'NR == 1 { print $1 }' releases.txt)
           prod=$(awk '$2 == "false" { print $1; exit }' releases.txt)

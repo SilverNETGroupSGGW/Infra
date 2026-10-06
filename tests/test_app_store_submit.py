@@ -491,6 +491,56 @@ class AppStoreSubmitTest(unittest.TestCase):
         # An empty release description sets no "What to Test".
         self.assertFalse(any("betaBuildLocalizations" in call for call in api.calls()))
 
+    def test_alpha_goes_to_the_private_testflight_group(self):
+        mock = AppStoreMock()
+        mock.groups["g-public"] = {"name": "Public beta", "isInternalGroup": False,
+                                   "publicLinkEnabled": True,
+                                   "publicLink": "https://testflight.apple.com/join/p"}
+        result, api = self.submit(mock, "build", "alpha", notes="Nowości")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(mock.what_to_test,
+                         {"notes-new": {"locale": "pl", "whatsNew": "Nowości"}})
+        self.assertEqual(mock.beta_contact, REVIEW)
+        self.assertEqual(mock.groups["g-new"]["name"], "Private beta")
+        self.assertFalse(mock.groups["g-new"]["publicLinkEnabled"])
+        self.assertEqual(mock.group_builds, {"g-new": {"b1"}})
+        self.assertTrue(mock.auto_notify)
+        self.assertEqual(mock.beta_submissions, ["b1"])
+        self.assertNotIn("testflight.apple.com", result.stdout)
+        self.assertIn('TestFlight group "Private beta"',
+                      (self.dir / "summary.md").read_text())
+
+    def test_alpha_reuses_the_private_group_and_refuses_a_public_link(self):
+        for public_link, code in ((False, 0), (True, 1)):
+            with self.subTest(public_link=public_link):
+                mock = AppStoreMock()
+                mock.groups["g-private"] = {"name": "Private beta",
+                                            "isInternalGroup": False,
+                                            "publicLinkEnabled": public_link,
+                                            "publicLink": None}
+                result, api = self.submit(mock, "build", "alpha", notes="x")
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertNotIn("POST /v1/betaGroups", api.calls())
+                if public_link:
+                    self.assertIn("has a public link", result.stderr)
+                    self.assertEqual(mock.group_builds, {})
+                else:
+                    self.assertEqual(mock.group_builds, {"g-private": {"b1"}})
+
+    def test_internal_test_stays_with_the_internal_testers(self):
+        for audience in ("INTERNAL_ONLY", "APP_STORE_ELIGIBLE"):
+            with self.subTest(audience):
+                mock = AppStoreMock(audience=audience)
+                result, api = self.submit(mock, "build", "internal", notes="Nowości")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(mock.what_to_test,
+                                 {"notes-new": {"locale": "pl", "whatsNew": "Nowości"}})
+                self.assertEqual(mock.group_builds, {})
+                self.assertEqual(mock.beta_submissions, [])
+                self.assertNotIn("betaGroups", " ".join(api.calls()))
+                self.assertIn("internal TestFlight testers",
+                              (self.dir / "summary.md").read_text())
+
     def test_beta_without_test_information_to_copy_fails(self):
         mock = AppStoreMock(versions={})
         result, api = self.submit(mock, "build", "beta", notes="x")
@@ -565,7 +615,7 @@ class AppStoreSubmitTest(unittest.TestCase):
         self.assertEqual(api.calls().count("PATCH /v1/reviewSubmissions/rs-new"), 2)
 
     def test_internal_only_build_is_not_submitted(self):
-        for channel in ("prod", "beta"):
+        for channel in ("prod", "beta", "alpha"):
             with self.subTest(channel):
                 mock = AppStoreMock(audience="INTERNAL_ONLY")
                 result, api = self.submit(mock, "build", channel, notes="x")

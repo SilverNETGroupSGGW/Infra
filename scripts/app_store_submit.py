@@ -5,11 +5,15 @@ beta. Finds the build VERSION (BUILD_NUMBER) in App Store Connect, waiting until
 a new upload is processed, and answers its export compliance if
 USES_NON_EXEMPT_ENCRYPTION is set.
 
-For a beta (CHANNEL=beta) it then makes the build a public TestFlight beta: it
-sets "What to Test" from the GitHub release description, fills in missing
-TestFlight test information from the app's App Store details, adds the build to
-an external group with a public link (created if needed) and submits it for
-Beta App Review. The public link is printed and added to the job summary.
+For a public beta (CHANNEL=beta) it then makes the build a public TestFlight
+beta: it sets "What to Test" from the GitHub release description, fills in
+missing TestFlight test information from the app's App Store details, adds the
+build to an external group with a public link (created if needed) and submits
+it for Beta App Review. The public link is printed and added to the job
+summary. A private test (CHANNEL=alpha) goes the same way to the external group
+"Private beta", which has no public link: its testers are invited in App Store
+Connect. An internal test (CHANNEL=internal) only gets "What to Test" and stays
+with the internal testers.
 
 For a release or a promotion it attaches the build to the App Store version
 VERSION (created if needed), sets "What's New" from the GitHub release
@@ -60,6 +64,8 @@ LISTING = ("description", "feedbackEmail")
 # Copied with the contact when App Review needs a demo account.
 DEMO_ACCOUNT = ("demoAccountRequired", "demoAccountName", "demoAccountPassword")
 PUBLIC_GROUP = "Public beta"
+# Testers invited by e-mail in App Store Connect.
+PRIVATE_GROUP = "Private beta"
 
 
 def b64url(data):
@@ -357,13 +363,17 @@ def fill_test_information(app_id, locale):
         )
 
 
-def public_group(app_id):
-    """The external TestFlight group with a public link, set up if needed."""
+def external_groups(app_id):
     groups = call("GET", f"/v1/apps/{app_id}/betaGroups", {
         "fields[betaGroups]": "name,isInternalGroup,publicLinkEnabled,publicLink",
         "limit": "200",
     })["data"]
-    external = [g for g in groups if not g["attributes"]["isInternalGroup"]]
+    return [g for g in groups if not g["attributes"]["isInternalGroup"]]
+
+
+def public_group(app_id):
+    """The external TestFlight group with a public link, set up if needed."""
+    external = external_groups(app_id)
     group = next((g for g in external if g["attributes"]["publicLinkEnabled"]), None)
     if group:
         return group
@@ -385,6 +395,24 @@ def public_group(app_id):
     }})["data"]
 
 
+def private_group(app_id):
+    """The external TestFlight group "Private beta", created if needed."""
+    group = next((g for g in external_groups(app_id)
+                  if g["attributes"]["name"] == PRIVATE_GROUP), None)
+    if group is None:
+        return call("POST", "/v1/betaGroups", body={"data": {
+            "type": "betaGroups",
+            "attributes": {"name": PRIVATE_GROUP, "publicLinkEnabled": False},
+            "relationships": {"app": {"data": {"type": "apps", "id": app_id}}},
+        }})["data"]
+    if group["attributes"]["publicLinkEnabled"]:
+        sys.exit(
+            f'The TestFlight group "{PRIVATE_GROUP}" has a public link; turn it off '
+            "in App Store Connect and re-run this job."
+        )
+    return group
+
+
 def submit_for_beta_review(build_id, name):
     submissions = call("GET", "/v1/betaAppReviewSubmissions", {
         "filter[build]": build_id,
@@ -401,14 +429,25 @@ def submit_for_beta_review(build_id, name):
     print(f"Submitted {name} for Beta App Review.")
 
 
-def public_beta(app, build, name):
-    """Makes the build a public TestFlight beta once Beta App Review approves it."""
-    locale = app["attributes"]["primaryLocale"]
+def summarize(line):
+    print(line)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as file:
+            file.write(line + "\n")
+
+
+def what_to_test(app, build):
     notes = release_notes(os.environ["TAG"])
     if notes:
-        set_what_to_test(build["id"], locale, notes)
-    fill_test_information(app["id"], locale)
-    group = public_group(app["id"])
+        set_what_to_test(build["id"], app["attributes"]["primaryLocale"], notes)
+
+
+def external_beta(app, build, name, public):
+    """Gives the build to a public or private group after Beta App Review."""
+    what_to_test(app, build)
+    fill_test_information(app["id"], app["attributes"]["primaryLocale"])
+    group = public_group(app["id"]) if public else private_group(app["id"])
     call("POST", f"/v1/betaGroups/{group['id']}/relationships/builds",
          body={"data": [{"type": "builds", "id": build["id"]}]})
     # Otherwise someone has to distribute the build once Beta App Review approves it.
@@ -417,13 +456,14 @@ def public_beta(app, build, name):
     })["data"]
     fill(beta_detail, {"autoNotifyEnabled": True})
     submit_for_beta_review(build["id"], name)
-    line = (f"TestFlight public link for {name}: {group['attributes']['publicLink']} "
-            "(works once Beta App Review approves the build)")
-    print(line)
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as file:
-            file.write(line + "\n")
+    if public:
+        summarize(f"TestFlight public link for {name}: "
+                  f"{group['attributes']['publicLink']} "
+                  "(works once Beta App Review approves the build)")
+    else:
+        summarize(f'{name} is in the TestFlight group "{PRIVATE_GROUP}"; its testers '
+                  "get it once Beta App Review approves the build (invite them in App "
+                  "Store Connect)")
 
 
 def app_store_version(app_id, version, versions):
@@ -505,7 +545,8 @@ def main():
     version = os.environ["VERSION"]
     build_number = os.environ["BUILD_NUMBER"]
     promote = os.environ["MODE"] == "promote"
-    beta = os.environ["CHANNEL"] == "beta"
+    channel = os.environ["CHANNEL"]
+    name = f"{version} ({build_number})"
 
     apps = call("GET", "/v1/apps", {
         "filter[bundleId]": bundle_id, "fields[apps]": "bundleId,primaryLocale",
@@ -517,10 +558,15 @@ def main():
 
     build = find_build(app_id, version, build_number, uploaded=not promote)
     answer_export_compliance(build)
+    if channel == "internal":
+        what_to_test(app, build)
+        summarize(f"{name} is available to the internal TestFlight testers (groups "
+                  "with automatic distribution get it at once)")
+        return
     if build["attributes"].get("buildAudienceType") == "INTERNAL_ONLY":
         sys.exit("The build is for internal TestFlight testing only.")
-    if beta:
-        public_beta(app, build, f"{version} ({build_number})")
+    if channel in ("beta", "alpha"):
+        external_beta(app, build, name, public=channel == "beta")
         return
 
     versions = call("GET", f"/v1/apps/{app_id}/appStoreVersions", {
