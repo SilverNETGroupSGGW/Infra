@@ -1,19 +1,7 @@
 name: Flutter release
 
-# Reusable: build a GitHub release of a Flutter app, attach the builds to it and
-# publish them to Google Play, App Store Connect and GitHub Pages.
-#
-# Call it from a workflow that runs `on: release: types: [published, released]`
-# (see README.md). The tag sets the version and the testers: X.Y.Z goes to
-# production (a leading "v" is optional), X.Y.Z-beta.N or rc.N to public
-# testing, X.Y.Z-alpha.N to private testing and X.Y.Z-internal.N to internal
-# testing. Turning a pre-release into a release promotes its builds without
-# rebuilding them. The Google Play and App Store
-# jobs run once the app passes its store ID and the store variables are set.
-#
-# A caller that also runs on workflow_dispatch can publish a release's store
-# builds again without rebuilding: run it from the release's tag with
-# publish-track and publish-platforms.
+# Reusable: builds a release of a Flutter app and publishes it to the stores
+# and Pages; the tag picks the testers (see README.md).
 
 on:
   workflow_call:
@@ -40,7 +28,7 @@ on:
         description: The app's numeric Apple ID in App Store Connect (App Information), needed with bundle-id.
         type: string
       play-beta-track:
-        description: API name of the Google Play open testing track that gets the betas. An app that had a closed testing track named Beta before Play added open testing keeps that track as `beta`; its open testing track has another name, such as `openBeta`.
+        description: API name of the Google Play open testing track, e.g. `openBeta` if `beta` is an old closed track.
         type: string
         default: beta
       play-alpha-track:
@@ -48,7 +36,7 @@ on:
         type: string
         default: alpha
       publish-track:
-        description: "Manual runs (workflow_dispatch, from a release's tag): the Google Play track to publish the release's build to, e.g. `internal`, play-alpha-track, play-beta-track or `production`. On iOS these mean the internal testers, a private or public TestFlight beta and App Review; other tracks skip iOS."
+        description: "Manual runs from a release's tag: the Google Play track to publish to; it also picks the iOS testers."
         type: string
       publish-platforms:
         description: "Manual runs: `all` (the default), `android` or `ios`."
@@ -61,7 +49,7 @@ on:
         description: Deploy the web builds to GitHub Pages once Pages is enabled for the repository.
         type: boolean
       environment:
-        description: Deployment environment of the jobs that use signing or store credentials, e.g. one with required reviewers. Empty for none.
+        description: Environment of the jobs that use signing or store credentials; empty for none.
         type: string
       build-tools:
         description: mise tools that the Android and web builds install (MISE_ENABLE_TOOLS).
@@ -162,9 +150,8 @@ jobs:
             internal) testers=internal ;;
             *) testers= ;;
           esac
-          # Grows with every version and pre-release, and a release (99) sorts
-          # after its pre-releases: 1.2.3-beta.4 builds 1020304, 1.2.3 builds
-          # 1020399. A promoted beta keeps its build number.
+          # A release (99) sorts after its pre-releases:
+          # 1.2.3-beta.4 builds 1020304, 1.2.3 builds 1020399.
           build_number=$((BASH_REMATCH[1] * 1000000 + BASH_REMATCH[2] * 10000 + BASH_REMATCH[3] * 100 + ${BASH_REMATCH[6]:-99}))
           manual=false android=true ios=true
           if [ "$EVENT" = workflow_dispatch ]; then
@@ -579,9 +566,8 @@ jobs:
         working-directory: ${{ inputs.app-dir }}
         env:
           TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-        # Signed ad hoc, so the archive keeps its entitlements; the export signs
-        # it for distribution. Signing for real here would need a development
-        # certificate on the runner.
+        # Signed ad hoc, which keeps the entitlements without a development
+        # certificate; the export signs it for distribution.
         run: |
           mise x -- flutter build ios --release --config-only --no-codesign
           xcrun xcodebuild archive \

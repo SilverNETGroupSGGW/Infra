@@ -1,10 +1,5 @@
-"""Runs the store scripts against local mocks of the store APIs.
-
-The App Store Connect mock checks every request against a trimmed copy of
-Apple's OpenAPI description; the Google Play mock checks track updates against
-Google's Track schema and the other requests with explicit assertions (see
-tests/specs/README.md).
-"""
+"""Runs the store scripts against local mocks of the store APIs, which check
+requests against the API descriptions in tests/specs."""
 
 import json
 import re
@@ -20,11 +15,8 @@ SPECS = Path(__file__).resolve().parent / "specs"
 
 
 class MockApi:
-    """Local HTTP server that records requests and answers with handler(request).
-
-    handler takes a Request and returns (status, JSON body or None); an exception
-    it raises goes to errors and is answered with HTTP 400.
-    """
+    """Local HTTP server recording requests and answering with handler(request);
+    an exception handler raises goes to errors and is answered with HTTP 400."""
 
     def __init__(self, handler):
         self.handler = handler

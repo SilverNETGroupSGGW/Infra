@@ -1,14 +1,11 @@
-# Store release setup of the organization's apps (terraform/app-release),
-# applied by the Terraform workflow after a reviewer approves it. A new app is
-# a new module block here and its project in `apps` of
-# terraform/bootstrap. Secrets are set with `gh secret set`.
+# Store release setup of the apps (terraform/app-release), applied by CI. A new
+# app is a module block here plus its project in `apps` of terraform/bootstrap.
 
 terraform {
   required_version = ">= 1.11"
 
-  # HCP Terraform keeps the state; the organization comes from
-  # TF_CLOUD_ORGANIZATION and the token from TF_TOKEN_app_terraform_io. Runs
-  # execute locally (in the Terraform workflow).
+  # State in HCP Terraform (TF_CLOUD_ORGANIZATION, TF_TOKEN_app_terraform_io);
+  # runs execute locally in the Terraform workflow.
   cloud {
     workspaces {
       name = "apps"
@@ -35,10 +32,8 @@ terraform {
   }
 }
 
-# Each app uses its Firebase project. With a Google Cloud organization
-# (silver.sggw.pl, later), a new app without one can get its project from the
-# module in the apps folder: uncomment this, set google_folder_id and drop
-# create_google_project.
+# With an organization, new apps can get projects in the apps folder:
+# uncomment this, set google_folder_id and drop create_google_project.
 #
 # variable "apps_folder_id" {
 #   description = "Google Cloud folder of the apps' projects (TF_APPS_FOLDER_ID of the terraform environment)."
@@ -99,8 +94,7 @@ module "plan_wzim" {
   google_project_id     = "silvertimetable-bea41"
   create_google_project = false # the app's Firebase project
   # google_folder_id    = var.apps_folder_id
-  # GitHub Free has no environments in private repositories; "release" once
-  # the repository is public.
+  # GitHub Free: no environments in private repos; "release" once public.
   environment       = null
   reviewer_user_ids = [33990351] # ThePhaseless
 
@@ -130,9 +124,8 @@ module "dni_sggw" {
   app_store_connect_key_id = "8P887NK246"
 }
 
-# Kampus SGGW waits until the club has access to its Firebase project
-# (kampus-sggw-2021); uncomment it together with its entry in
-# terraform/bootstrap.
+# Kampus SGGW waits until the club has access to its Firebase project;
+# uncomment it together with its entry in terraform/bootstrap.
 #
 # module "kampus_sggw" {
 #   source = "../app-release"

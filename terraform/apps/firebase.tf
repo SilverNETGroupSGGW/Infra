@@ -1,15 +1,5 @@
-# The apps' Firebase resources, imported as they were set up in the Firebase
-# console. Deployments stay with the apps' repositories (`firebase deploy`):
-# Firestore and Storage rules, Hosting releases and Cloud Functions are not
-# managed here, so the two never overwrite each other. Databases, buckets
-# and Hosting sites can never be destroyed by Terraform.
-#
-# Not imported: Realtime Database (none), Analytics and Cloud Messaging (no
-# Terraform resources), Plan WZIM's Firebase link of its default bucket (a
-# legacy App Engine bucket; reading the link needs the Cloud Storage for
-# Firebase API, which the project does not use), Dni SGGW's Storage bucket
-# (locked on the Spark plan) and its sendNotificationBroadcast function
-# (deployed from sggw_days).
+# The apps' Firebase resources, imported from the console. Rules, Hosting
+# releases and Functions stay with each app's `firebase deploy`.
 
 locals {
   plan_wzim_project = "silvertimetable-bea41"

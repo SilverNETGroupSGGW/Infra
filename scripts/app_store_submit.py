@@ -1,29 +1,5 @@
-"""Finishes an App Store Connect upload of the app BUNDLE_ID.
-
-Run by .github/workflows/flutter-release.yml after an upload or for a promoted
-beta. Finds the build VERSION (BUILD_NUMBER) in App Store Connect, waiting until
-a new upload is processed, and answers its export compliance if
-USES_NON_EXEMPT_ENCRYPTION is set.
-
-For a public beta (CHANNEL=beta) it then makes the build a public TestFlight
-beta: it sets "What to Test" from the GitHub release description, fills in
-missing TestFlight test information from the app's App Store details, adds the
-build to an external group with a public link (created if needed) and submits
-it for Beta App Review. The public link is printed and added to the job
-summary. A private test (CHANNEL=alpha) goes the same way to the group
-"Private beta", which has no public link. An internal test (CHANNEL=internal)
-only gets "What to Test".
-
-For a release or a promotion it attaches the build to the App Store version
-VERSION (created if needed), sets "What's New" from the GitHub release
-description and submits the version for App Review; it is released
-automatically once approved. A re-run continues an unfinished submission.
-
-Environment: KEY_ID, ISSUER_ID and KEY_PATH (the App Store Connect API key),
-BUNDLE_ID, MODE (build or promote), CHANNEL, TAG, VERSION, BUILD_NUMBER,
-USES_NON_EXEMPT_ENCRYPTION (optional: "false" or "true") and GH_TOKEN. Uses
-only the Python standard library and the openssl command.
-"""
+"""Sends an App Store Connect build to TestFlight or App Review.
+Run by flutter-release.yml with its settings in environment variables."""
 
 import base64
 import json
@@ -311,11 +287,8 @@ def fill(resource, values):
 
 
 def fill_test_information(app_id, locale):
-    """Copies missing TestFlight test information from the App Store details.
-
-    External testing needs a Beta App Review contact and, in the primary
-    language, a beta app description and feedback e-mail. Set fields are kept.
-    """
+    """Copies missing TestFlight test information from the App Store details;
+    external testing needs a contact, beta description and feedback e-mail."""
     detail = call("GET", f"/v1/apps/{app_id}/betaAppReviewDetail", {
         "fields[betaAppReviewDetails]": ",".join(CONTACT + DEMO_ACCOUNT),
     })["data"]

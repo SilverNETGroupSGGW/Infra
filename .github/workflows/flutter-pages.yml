@@ -1,16 +1,7 @@
 name: Flutter web on GitHub Pages
 
-# Reusable: serve the newest release's web build at the site root and the
-# newest release or public beta under /beta/ (alpha and internal pre-releases
-# stay off the site). It uses the <prefix>-<tag>-web.zip assets that
-# flutter-release.yml attaches to the releases, and drops the BETA badge (see
-# README.md, "Task contract") from the root. flutter-release.yml calls it; call it from a workflow_dispatch workflow
-# to redeploy by hand.
-#
-# Enable Pages with "Source: GitHub Actions", then allow the release tags to
-# deploy: release runs use their tag as the ref, and the github-pages
-# environment only admits the default branch at first (Settings > Environments
-# > github-pages > Deployment branches and tags > add the tag rule "*").
+# Reusable: serves the newest release at the site root, the newest public beta
+# under /beta/. Release runs deploy from their tag: allow the tag rule "*".
 
 on:
   workflow_call:

@@ -1,7 +1,5 @@
-# actionlint 1.7.12 does not know these newer workflow features yet:
-# `cache-mode` (rhysd/actionlint#745), the concurrency `queue` (#657), the
-# `$/` reference to a reusable workflow in the same repository (#711) and the
-# `job.workflow_*` context properties.
+# actionlint 1.7.12 does not know these newer workflow features yet
+# (rhysd/actionlint#745, #657 and #711).
 paths:
   .github/workflows/**/*.{yml,yaml}:
     ignore:

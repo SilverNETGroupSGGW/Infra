@@ -1,9 +1,6 @@
 name: Flutter CI
 
-# Reusable: lint, test and build a Flutter app on every push and pull request.
-# The calling repository provides the mise tasks of the task contract (see
-# README.md): check, build:apk, build:web, and codegen / build:ios if those
-# inputs are on.
+# Reusable: lint, test and build a Flutter app with its mise tasks (README.md).
 
 on:
   workflow_call:
@@ -27,7 +24,7 @@ on:
         type: boolean
         default: true
       ios:
-        description: Build the iOS app without code signing (`mise run build:ios`) on macOS. macOS minutes count ten times on private repositories.
+        description: Build the iOS app unsigned on macOS (`mise run build:ios`); macOS minutes count ten times.
         type: boolean
       macos-runner:
         description: Runner label of the iOS build.

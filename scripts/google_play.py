@@ -1,17 +1,5 @@
 """Publishes a release to Google Play with the Play Developer API.
-
-Run by .github/workflows/flutter-release.yml. MODE=build uploads the App Bundle
-BUNDLE_PATH and releases it on the track TRACK; MODE=promote releases on TRACK a
-version code an earlier run uploaded, without uploading it again, even if a later
-beta replaced it on the open testing track BETA_TRACK. A production release is
-named after the version without its pre-release label.
-
-Environment: ACCESS_TOKEN (OAuth token with the androidpublisher scope),
-PACKAGE_NAME (the Android application ID), MODE, TRACK, BETA_TRACK, TAG,
-VERSION_CODE, BUNDLE_PATH (for MODE=build), NOTES_LANGUAGE, and GH_TOKEN for
-reading the release notes from the GitHub release. Uses only the Python
-standard library.
-"""
+Run by flutter-release.yml with its settings in environment variables."""
 
 import hashlib
 import json
