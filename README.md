@@ -200,8 +200,11 @@ them.
   Connect) after Beta App Review. An `internal` pre-release goes to the
   `internal` track and stays with TestFlight's internal testers. Pages skips
   both, but the GitHub release and its builds are as visible as the
-  repository. A tester of several tracks gets the highest build number among
-  them, so a newer beta also reaches the testers of an older alpha.
+  repository. No build is copied to another track, but a Google Play tester
+  gets the highest build number among the tracks they joined (production
+  counts for everyone): a private tester who also joined open testing gets a
+  newer beta. On TestFlight, internal groups with automatic distribution get
+  every build; external groups only the builds added to them.
 - **Production:** publish a release tagged `X.Y.Z`. Google Play gets it on the
   production track, App Review gets the iOS build (released once approved),
   and Pages serves it at the site root.
