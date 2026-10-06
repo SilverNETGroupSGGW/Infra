@@ -459,14 +459,37 @@ def submit(submission_id, version_id):
             time.sleep(30)
 
 
-def open_submission(app_id):
-    """The unsent review submission, if any, with the versions it contains."""
-    submissions = call("GET", "/v1/reviewSubmissions", {
+def review_submissions(app_id):
+    return call("GET", "/v1/reviewSubmissions", {
         "filter[app]": app_id,
         "filter[platform]": "IOS",
         "filter[state]": "READY_FOR_REVIEW,WAITING_FOR_REVIEW,IN_REVIEW,UNRESOLVED_ISSUES",
     })["data"]
+
+
+def withdraw(submission_id, app_id):
+    """Takes a submission that App Review has not started out of review."""
+    call("PATCH", f"/v1/reviewSubmissions/{submission_id}", body={"data": {
+        "type": "reviewSubmissions",
+        "id": submission_id,
+        "attributes": {"canceled": True},
+    }})
+    for _ in range(40):
+        if all(s["id"] != submission_id for s in review_submissions(app_id)):
+            print("Withdrew the version waiting for review; this release replaces it.")
+            return
+        time.sleep(15)
+    sys.exit("The submission waiting for review was not withdrawn in 10 minutes.")
+
+
+def open_submission(app_id, replace_waiting=False):
+    """The unsent review submission, if any, with the versions it contains;
+    with replace_waiting, withdraws one that waits for App Review first."""
+    submissions = review_submissions(app_id)
     busy = [s for s in submissions if s["attributes"]["state"] != "READY_FOR_REVIEW"]
+    if busy and replace_waiting and busy[0]["attributes"]["state"] == "WAITING_FOR_REVIEW":
+        withdraw(busy[0]["id"], app_id)
+        return open_submission(app_id)
     if busy:
         sys.exit(
             f"A submission is already {busy[0]['attributes']['state']}; "
@@ -591,6 +614,14 @@ def update_screenshots(version_id):
     wait_for_screenshots(uploaded)
 
 
+def app_store_versions(app_id):
+    return call("GET", f"/v1/apps/{app_id}/appStoreVersions", {
+        "filter[platform]": "IOS",
+        "fields[appStoreVersions]": "versionString,appVersionState,releaseType",
+        "limit": "200",
+    })["data"]
+
+
 def main():
     bundle_id = os.environ["BUNDLE_ID"]
     version = os.environ["VERSION"]
@@ -615,11 +646,7 @@ def main():
         public_beta(app, build, name)
         return
 
-    versions = call("GET", f"/v1/apps/{app_id}/appStoreVersions", {
-        "filter[platform]": "IOS",
-        "fields[appStoreVersions]": "versionString,appVersionState,releaseType",
-        "limit": "200",
-    })["data"]
+    versions = app_store_versions(app_id)
     same = next((v for v in versions if v["attributes"]["versionString"] == version), None)
     state = same["attributes"]["appVersionState"] if same else None
     if state in SUBMITTED or state == "READY_FOR_REVIEW":
@@ -647,11 +674,13 @@ def main():
             "App Store updates need \"What's New\": write it in the GitHub "
             "release description and re-run this job."
         )
-    submission_id, contents = open_submission(app_id)
+    # An earlier version still waiting for App Review gives way to this one,
+    # as on Google Play; a withdrawn version becomes editable and is reused.
+    submission_id, contents = open_submission(app_id, replace_waiting=True)
     if contents:
         sys.exit("An unsent submission already has items; check it in App Store Connect.")
 
-    version_id = app_store_version(app_id, version, versions)
+    version_id = app_store_version(app_id, version, app_store_versions(app_id))
     call("PATCH", f"/v1/appStoreVersions/{version_id}", body={"data": {
         "type": "appStoreVersions",
         "id": version_id,

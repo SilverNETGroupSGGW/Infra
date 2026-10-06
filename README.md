@@ -195,7 +195,9 @@ them.
   the tracks they joined, production included.
 - **Production:** publish a release without ticking "Set as a pre-release".
   Google Play gets it on the production track, App Review gets the iOS build
-  (released once approved), and Pages serves it at the site root.
+  (released once approved), and Pages serves it at the site root. An earlier
+  version still waiting for App Review is withdrawn and replaced, as Google
+  Play does; one that App Review has started stops the run.
 - **Closed and internal tests** are not automated: upload the builds attached
   to a release in Play Console and App Store Connect.
 - **Promotion:** untick "Set as a pre-release" on a tested pre-release. The
