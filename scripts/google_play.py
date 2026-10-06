@@ -126,7 +126,9 @@ def screenshot_folder(device, language):
 
 
 def update_screenshots(edit):
-    """Replaces the listings' screenshots that differ from SCREENSHOTS_DIR."""
+    """Replaces the listings' screenshots that differ from SCREENSHOTS_DIR;
+    returns how many image sets it replaced."""
+    replaced = 0
     listings = call("GET", f"{API}/edits/{edit}/listings").get("listings", [])
     for language in sorted(listing["language"] for listing in listings):
         for device, image_type in SCREENSHOT_TYPES.items():
@@ -147,14 +149,26 @@ def update_screenshots(edit):
                      f"{image_type}?uploadType=media", data=image,
                      content_type="image/png")
             print(f"Replaced the {language} {image_type} with {folder}.")
+            replaced += 1
+    return replaced
 
 
 def main():
     mode = os.environ["MODE"]
     tag = os.environ["TAG"]
+    edit = call("POST", f"{API}/edits", body={})["id"]
+    if mode == "listing":
+        # The store listing alone, sent for review if anything changed.
+        if not os.environ.get("SCREENSHOTS_DIR"):
+            sys.exit("No screenshots to publish: set screenshots-task.")
+        if update_screenshots(edit):
+            commit(edit)
+        else:
+            call("DELETE", f"{API}/edits/{edit}")
+            print("The store screenshots are up to date.")
+        return
     version_code = os.environ["VERSION_CODE"]
     notes = release_notes(tag)
-    edit = call("POST", f"{API}/edits", body={})["id"]
 
     track = TRACK
     if mode == "build":

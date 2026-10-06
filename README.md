@@ -219,6 +219,10 @@ them.
   devices `phone`, `tablet-7` and `tablet-10`, and the App Store version for
   `iphone-6.9` (the required large iPhone size, 1320×2868) and `ipad-13`
   (2064×2752). Testing tracks keep the listing.
+  A manual run with the track `listing`, from any tag, replaces only the
+  Google Play screenshots (Google reviews the listing). App Store screenshots
+  change only with a new App Store version, so production releases update
+  them.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
   language).

@@ -32,7 +32,7 @@ on:
         type: string
         default: beta
       publish-track:
-        description: "Manual runs from a release's tag: `production` or the open testing track (play-beta-track)."
+        description: "Manual runs from a release's tag: `production` or the open testing track (play-beta-track). `listing`, from any tag, only replaces the Google Play screenshots (screenshots-task)."
         type: string
       publish-platforms:
         description: "Manual runs: `all` (the default), `android` or `ios`."
@@ -134,6 +134,23 @@ jobs:
               exit 1
               ;;
           esac
+          if [ "$EVENT" = workflow_dispatch ] && [ "$TRACK" = listing ]; then
+            # The store listing alone: no version, release or build.
+            if [ "$PLATFORMS" = ios ]; then
+              echo "::error::App Store screenshots change only with a new App Store version: publish a production release."
+              exit 1
+            fi
+            echo "::notice::App Store screenshots change only with a new App Store version, so the next production release updates them."
+            {
+              echo "mode=listing"
+              echo "manual=true"
+              echo "channel=listing"
+              echo "android=true"
+              echo "ios=false"
+              echo "tag=$TAG"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # [v]X.Y.Z, or [v]X.Y.Z-<label><N> such as 1.2.0-beta.3 or 1.2.0-rc2;
           # the label is free text, only N counts.
           semver='^v?(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-([0-9A-Za-z.-]*[A-Za-z.-])?([1-9][0-9]?))?$'
@@ -480,7 +497,8 @@ jobs:
     if: >-
       ${{ !cancelled() && inputs.android-package != '' && vars.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
       && needs.plan.outputs.android == 'true' && needs.screenshots.result != 'failure'
-      && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
+      && (needs.publish.result == 'success' || needs.promote.result == 'success'
+      || needs.plan.outputs.mode == 'listing') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: ${{ inputs.environment }}
@@ -785,8 +803,8 @@ jobs:
     # Rendered from the tag for the store listings, which go with production.
     needs: plan
     if: >-
-      ${{ inputs.screenshots-task != '' && needs.plan.outputs.channel == 'prod'
-      && needs.plan.outputs.mode != 'skip' }}
+      ${{ inputs.screenshots-task != '' && (needs.plan.outputs.mode == 'listing'
+      || needs.plan.outputs.channel == 'prod' && needs.plan.outputs.mode != 'skip') }}
     permissions:
       contents: read # clone the repository
     uses: $/.github/workflows/flutter-screenshots.yml
