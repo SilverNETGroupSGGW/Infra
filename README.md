@@ -209,7 +209,8 @@ them.
   same Play build moves to production, the same TestFlight build goes to App
   Review, and Pages serves it at the root without the BETA badge; nothing is
   rebuilt. The store jobs check again that the release is still a release
-  before changing anything.
+  before changing anything. The release's title and build files lose the
+  pre-release label (`App 1.2.0 beta 3` becomes `App 1.2.0`); the tag keeps it.
 - **Publishing again:** run the release workflow by hand from the release's
   tag ("Use workflow from", or
   `gh workflow run release.yml --ref v1.2.0-beta.3 -f track=production`). The
