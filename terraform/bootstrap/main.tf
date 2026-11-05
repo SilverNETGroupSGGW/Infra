@@ -4,6 +4,16 @@
 terraform {
   required_version = ">= 1.11"
 
+  # State in HCP Terraform; plan and apply run on the admin's machine with
+  # the admin's accounts (local execution mode, README.md).
+  cloud {
+    organization = "KN-Silver"
+
+    workspaces {
+      name = "bootstrap"
+    }
+  }
+
   required_providers {
     github = {
       source  = "integrations/github"
@@ -12,10 +22,6 @@ terraform {
     google = {
       source  = "hashicorp/google"
       version = "~> 8.5"
-    }
-    googleplay = {
-      source  = "oliver-binns/googleplay"
-      version = "~> 0.6.3"
     }
     tfe = {
       source  = "hashicorp/tfe"
@@ -78,11 +84,6 @@ provider "github" {
   owner = "SilverNETGroupSGGW"
 }
 
-# Kept so the next apply can remove the Terraform account's Play access.
-provider "googleplay" {
-  developer_id = "8827645756827128332" # KN Silver .NET
-}
-
 data "github_repository" "infra" {
   name = "Infra"
 }
@@ -90,6 +91,17 @@ data "github_repository" "infra" {
 locals {
   repository_id = tostring(data.github_repository.infra.repo_id)
   environment   = "terraform"
+
+  # "<app> <role>" => { app, role }: the Terraform account's roles per app project.
+  app_roles = {
+    for pair in setproduct(keys(var.apps), [
+      "roles/browser",
+      "roles/firebase.admin",
+      "roles/iam.serviceAccountAdmin",
+      "roles/iam.workloadIdentityPoolAdmin",
+      "roles/serviceusage.serviceUsageAdmin",
+    ]) : "${pair[0]} ${pair[1]}" => { app = pair[0], role = pair[1] }
+  }
 }
 
 # The club's existing organization, adopted; its settings stay as they are.
@@ -119,6 +131,25 @@ resource "tfe_workspace" "apps" {
 resource "tfe_workspace_settings" "apps" {
   workspace_id   = tfe_workspace.apps.id
   execution_mode = "local"
+}
+
+# This configuration's own state. `terraform init` creates the workspace; it
+# must be set to local before the first plan (README.md).
+resource "tfe_workspace" "bootstrap" {
+  organization = tfe_organization.silver.name
+  name         = "bootstrap"
+  description  = "terraform/bootstrap of SilverNETGroupSGGW/Infra"
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "tfe_workspace_settings" "bootstrap" {
+  workspace_id         = tfe_workspace.bootstrap.id
+  execution_mode       = "local"
+  global_remote_state  = false
+  project_remote_state = false
 }
 
 # resource "google_folder" "apps" {
@@ -213,15 +244,7 @@ resource "google_service_account_iam_member" "terraform_github" {
 # Lets terraform/apps manage release sign-in and Firebase in each app project;
 # with an organization: on the apps folder, plus resourcemanager.projectCreator.
 resource "google_project_iam_member" "terraform" {
-  for_each = {
-    for pair in setproduct(keys(var.apps), [
-      "roles/browser",
-      "roles/firebase.admin",
-      "roles/iam.serviceAccountAdmin",
-      "roles/iam.workloadIdentityPoolAdmin",
-      "roles/serviceusage.serviceUsageAdmin",
-    ]) : "${pair[0]} ${pair[1]}" => { app = pair[0], role = pair[1] }
-  }
+  for_each = local.app_roles
 
   project = google_project.apps[each.value.app].project_id
   role    = each.value.role
@@ -281,7 +304,8 @@ resource "github_actions_variable" "terraform" {
   value         = each.value
 }
 
-# Created by a first run whose state was not kept; adopted if still unknown.
+# Created by runs whose local state was lost (2026-10); adopted into the HCP
+# state. Later additions have no import here and show as creates.
 import {
   to = google_project.infra
   id = var.infra_project_id
@@ -310,4 +334,72 @@ import {
 import {
   to = github_repository_environment_deployment_policy.terraform_plan_main
   id = "Infra:terraform-plan:65637395"
+}
+
+import {
+  to = tfe_workspace.apps
+  id = "${var.hcp_organization}/apps"
+}
+
+import {
+  to = tfe_workspace_settings.apps
+  id = "${var.hcp_organization}/apps"
+}
+
+import {
+  to = tfe_workspace.bootstrap
+  id = "${var.hcp_organization}/bootstrap"
+}
+
+import {
+  to = tfe_workspace_settings.bootstrap
+  id = "${var.hcp_organization}/bootstrap"
+}
+
+import {
+  for_each = toset([
+    "androidpublisher.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "iam.googleapis.com",
+    "iamcredentials.googleapis.com",
+    "serviceusage.googleapis.com",
+    "sts.googleapis.com",
+  ])
+  to = google_project_service.infra[each.key]
+  id = "${var.infra_project_id}/${each.key}"
+}
+
+import {
+  to = google_iam_workload_identity_pool.github
+  id = "projects/${var.infra_project_id}/locations/global/workloadIdentityPools/github"
+}
+
+import {
+  to = google_iam_workload_identity_pool_provider.terraform
+  id = "projects/${var.infra_project_id}/locations/global/workloadIdentityPools/github/providers/infra-terraform"
+}
+
+# 389882651708 is the number of silvernet-infra, which the pool's name uses.
+import {
+  to = google_service_account_iam_member.terraform_github
+  id = "projects/${var.infra_project_id}/serviceAccounts/terraform@${var.infra_project_id}.iam.gserviceaccount.com roles/iam.workloadIdentityUser principalSet://iam.googleapis.com/projects/389882651708/locations/global/workloadIdentityPools/github/attribute.repository_id/${local.repository_id}"
+}
+
+# Only the apps of 2026-10; an app added later gets its bindings created.
+import {
+  for_each = { for k, v in local.app_roles : k => v if contains(["plan_wzim", "dni_sggw"], v.app) }
+  to       = google_project_iam_member.terraform[each.key]
+  id       = "${var.apps[each.value.app].project_id} ${each.value.role} serviceAccount:terraform@${var.infra_project_id}.iam.gserviceaccount.com"
+}
+
+import {
+  for_each = toset([
+    "TF_CLOUD_ORGANIZATION",
+    "TF_GITHUB_APP_ID",
+    "TF_GITHUB_APP_INSTALLATION_ID",
+    "TF_GOOGLE_SERVICE_ACCOUNT",
+    "TF_GOOGLE_WORKLOAD_IDENTITY_PROVIDER",
+  ])
+  to = github_actions_variable.terraform[each.key]
+  id = "Infra:${each.key}"
 }
