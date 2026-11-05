@@ -25,10 +25,6 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 8.5"
     }
-    googleplay = {
-      source  = "oliver-binns/googleplay"
-      version = "~> 0.6.3"
-    }
   }
 }
 
@@ -73,10 +69,6 @@ provider "google" {
 # Firebase resources (firebase.tf).
 provider "google-beta" {
   user_project_override = true
-}
-
-provider "googleplay" {
-  developer_id = "8827645756827128332" # KN Silver .NET
 }
 
 locals {
@@ -137,36 +129,6 @@ module "dni_sggw" {
 #   apple_team_id               = local.apple.team_id
 #   app_store_connect_issuer_id = local.apple.issuer_id
 # }
-
-# Play's users API refuses the Terraform account, so the release accounts'
-# Play Console access is granted by hand; forget it without deleting it.
-removed {
-  from = module.plan_wzim.googleplay_user.releases
-  lifecycle {
-    destroy = false
-  }
-}
-
-removed {
-  from = module.plan_wzim.googleplay_app_iam.releases
-  lifecycle {
-    destroy = false
-  }
-}
-
-removed {
-  from = module.dni_sggw.googleplay_user.releases
-  lifecycle {
-    destroy = false
-  }
-}
-
-removed {
-  from = module.dni_sggw.googleplay_app_iam.releases
-  lifecycle {
-    destroy = false
-  }
-}
 
 # Variables set by hand before Terraform managed them.
 import {
