@@ -1,25 +1,104 @@
 {
-  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-  // GitHub Actions (pinned by SHA), mise.toml tools and Terraform providers.
-  extends: ['config:recommended'],
-  // Refreshes the .terraform.lock.hcl hashes; not automerged because it can
-  // also move providers, including the Google Play one.
-  lockFileMaintenance: {
-    enabled: true,
-  },
-  packageRules: [
-    {
-      // Merged after CI passes and the release is three days old, so a hijacked
-      // release is likely pulled before it lands; majors wait for a review.
-      matchUpdateTypes: ['minor', 'patch', 'pin', 'digest'],
-      minimumReleaseAge: '3 days',
-      automerge: true,
-    },
-    {
-      // A single maintainer's provider with access to Play Console: every
-      // update waits for a review.
-      matchPackageNames: ['oliver-binns/googleplay'],
-      automerge: false,
-    },
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices"
   ],
+  "minimumReleaseAge": "3 days",
+  "osvVulnerabilityAlerts": true,
+  "postUpdateOptions": [
+    "gomodTidyAll",
+    "gomodUpdateImportPaths",
+    "npmDedupe",
+    "pnpmDedupe",
+    "yarnDedupeFewer",
+    "bundlerConservative"
+  ],
+  "lockFileMaintenance": {
+    "automerge": false
+  },
+  "pre-commit": {
+    "enabled": true,
+    "automerge": true
+  },
+  "kubernetes": {
+    "managerFilePatterns": [
+      "/\\.ya?ml$/"
+    ]
+  },
+  "packageRules": [
+    {
+      "groupName": "All non-major dependencies",
+      "groupSlug": "all-minor-patch",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pinDigest"
+      ],
+      "automerge": true
+    },
+    {
+      "description": "Renovate skips indirect Go modules by default; keep them current in one PR",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "enabled": true,
+      "groupName": "indirect Go modules"
+    },
+    {
+      "description": "A major Go version is a new module path that nothing imports, so go mod tidy drops it and the bump never builds",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchDepTypes": [
+        "indirect"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "No release date to check: Docker images outside Docker Hub (renovate#39064, #38572, #38656)",
+      "matchDatasources": [
+        "docker"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "No release date to check: update types Renovate cannot age (docs: key-concepts/minimum-release-age)",
+      "matchUpdateTypes": [
+        "lockFileMaintenance",
+        "lockfileUpdate",
+        "pin",
+        "rollback"
+      ],
+      "minimumReleaseAgeBehaviour": "timestamp-optional"
+    },
+    {
+      "description": "A single maintainer's provider with access to Play Console: every update gets its own PR and waits for a review. Lock file maintenance is not automerged for the same reason, since it can move this provider.",
+      "matchPackageNames": [
+        "oliver-binns/googleplay"
+      ],
+      "groupName": "googleplay provider",
+      "automerge": false
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Versions annotated with '# renovate: datasource=... depName=...' in Terraform files",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/\\.tf$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[^:]+?) depName=(?<depName>.+?)( versioning=(?<versioning>.+?))?( extractVersion=(?<extractVersion>.+?))?( registryUrl=(?<registryUrl>.+?))?\\s.+?[:=]\\s*[\"']?(?<currentValue>.+?)[\"']?\\s"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver-coerced{{/if}}",
+      "extractVersionTemplate": "{{#if extractVersion}}{{{extractVersion}}}{{else}}^v?(?<version>.+)${{/if}}"
+    }
+  ]
 }
