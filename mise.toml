@@ -51,7 +51,3 @@ depends = [
 [tasks.test]
 description = "Test the store scripts against local mocks of the store APIs"
 run = "python3 -m unittest discover -s tests -t . -v"
-
-[tasks.check]
-description = "Run all linters and tests"
-depends = ["lint", "test"]
