@@ -89,14 +89,6 @@
         "rollback"
       ],
       "minimumReleaseAgeBehaviour": "timestamp-optional"
-    },
-    {
-      "description": "A single maintainer's provider with access to Play Console: every update gets its own PR and waits for a review. Lock file maintenance is not automerged for the same reason, since it can move this provider.",
-      "matchPackageNames": [
-        "oliver-binns/googleplay"
-      ],
-      "groupName": "googleplay provider",
-      "automerge": false
     }
   ],
   "customManagers": [
