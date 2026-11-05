@@ -22,7 +22,7 @@ variable "google_project_name" {
 variable "create_google_project" {
   description = "Create the project; false uses an existing one (service accounts can only create projects in a Google Cloud organization)."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "google_org_id" {
