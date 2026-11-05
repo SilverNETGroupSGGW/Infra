@@ -10,7 +10,8 @@ __pycache__/
 # Terraform working files; the module's callers keep their own lock files
 .terraform/
 terraform/app-release/.terraform.lock.hcl
-# State of terraform/bootstrap, kept by whoever applied it
+# Local state copies, saved plans and the GitHub App's private key
 *.tfstate
 *.tfstate.*
 tfplan
+*.pem
