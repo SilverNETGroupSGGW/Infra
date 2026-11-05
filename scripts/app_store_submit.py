@@ -2,8 +2,10 @@
 Run by flutter-release.yml with its settings in environment variables."""
 
 import base64
+import http.client
 import json
 import os
+import ssl
 import subprocess
 import sys
 import time
@@ -126,6 +128,11 @@ def call(method, path, params=None, body=None, retries=4):
                 time.sleep(min(60, 5 * 2**attempt))
                 continue
             raise ApiError(error.code, text) from None
+        except (OSError, http.client.HTTPException):
+            # URLError, timeouts, resets and broken responses; only reads are safe to send again.
+            if method != "GET" or attempt == retries:
+                raise
+            time.sleep(min(60, 5 * 2**attempt))
 
 
 def release_notes(tag):
@@ -145,8 +152,8 @@ def find_build(app_id, version, build_number, uploaded):
             "filter[preReleaseVersion.version]": version,
             "filter[version]": build_number,
             "filter[preReleaseVersion.platform]": "IOS",
-            "fields[builds]": "version,processingState,expired,"
-            "usesNonExemptEncryption,buildAudienceType",
+            "fields[builds]": "processingState,expired,usesNonExemptEncryption,"
+            "buildAudienceType",
             "limit": "10",
         })["data"]
         if not builds and not uploaded:
@@ -459,6 +466,15 @@ def review_submissions(app_id):
     })["data"]
 
 
+def all_editable(version_ids):
+    return all(
+        call("GET", f"/v1/appStoreVersions/{version_id}", {
+            "fields[appStoreVersions]": "appVersionState",
+        })["data"]["attributes"]["appVersionState"] in EDITABLE
+        for version_id in version_ids
+    )
+
+
 def withdraw(submission_id, app_id):
     """Takes a submission that App Review has not started out of review and
     waits until its versions can be edited again."""
@@ -478,12 +494,7 @@ def withdraw(submission_id, app_id):
     for _ in range(40):
         gone = all(s["id"] != submission_id for s in review_submissions(app_id))
         # App Store Connect makes the versions editable a little later.
-        if gone and all(
-            call("GET", f"/v1/appStoreVersions/{version_id}", {
-                "fields[appStoreVersions]": "appVersionState",
-            })["data"]["attributes"]["appVersionState"] in EDITABLE
-            for version_id in version_ids
-        ):
+        if gone and all_editable(version_ids):
             print("Withdrew the version waiting for review; this release replaces it.")
             return
         time.sleep(15)
@@ -491,7 +502,8 @@ def withdraw(submission_id, app_id):
 
 
 def open_submission(app_id, replace_waiting=False):
-    """The unsent review submission, if any, with the versions it contains;
+    """The unsent review submission's id, or None, and its items as
+    {item id: App Store version id, or None for another kind of item};
     with replace_waiting, withdraws one that waits for App Review first."""
     submissions = review_submissions(app_id)
     busy = [s for s in submissions if s["attributes"]["state"] != "READY_FOR_REVIEW"]
@@ -504,21 +516,39 @@ def open_submission(app_id, replace_waiting=False):
             "resolve it in App Store Connect."
         )
     if not submissions:
-        return None, []
+        return None, {}
     items = call("GET", f"/v1/reviewSubmissions/{submissions[0]['id']}/items", {
         "include": "appStoreVersion",
     })["data"]
-    versions = [
-        (item["relationships"]["appStoreVersion"].get("data") or {}).get("id")
+    return submissions[0]["id"], {
+        item["id"]: (item["relationships"]["appStoreVersion"].get("data") or {}).get("id")
         for item in items
-    ]
-    return submissions[0]["id"], versions
+    }
+
+
+def remove_items(items):
+    """Empties the unsent submission: a run that stopped before sending it left
+    these versions in it."""
+    for item_id in items:
+        call("DELETE", f"/v1/reviewSubmissionItems/{item_id}")
+    for _ in range(40):
+        if all_editable(items.values()):
+            print("Removed the other versions from the unsent submission; "
+                  "this release replaces them.")
+            return
+        time.sleep(15)
+    sys.exit("The versions removed from the unsent submission did not become "
+             "editable in 10 minutes.")
+
+
+def numeric(version):
+    return tuple(int(part) for part in version.split("."))
 
 
 def app_store_versions(app_id):
     return call("GET", f"/v1/apps/{app_id}/appStoreVersions", {
         "filter[platform]": "IOS",
-        "fields[appStoreVersions]": "versionString,appVersionState,releaseType",
+        "fields[appStoreVersions]": "versionString,appVersionState",
         "limit": "200",
     })["data"]
 
@@ -558,8 +588,8 @@ def main():
             print(f"{version} ({build_number}) is already {state}.")
             return
         # A previous run added the version to a submission but did not send it.
-        submission_id, contents = open_submission(app_id)
-        if submission_id is None or contents != [same["id"]]:
+        submission_id, items = open_submission(app_id)
+        if submission_id is None or list(items.values()) != [same["id"]]:
             sys.exit(f"Send the review submission of {version} in App Store Connect.")
         submit(submission_id, same["id"])
         print(f"Submitted {version} ({build_number}) for App Review.")
@@ -577,9 +607,19 @@ def main():
         )
     # An earlier version still waiting for App Review gives way to this one,
     # as on Google Play; a withdrawn version becomes editable and is reused.
-    submission_id, contents = open_submission(app_id, replace_waiting=True)
-    if contents:
-        sys.exit("An unsent submission already has items; check it in App Store Connect.")
+    higher = [v["attributes"] for v in versions
+              if numeric(v["attributes"]["versionString"]) > numeric(version)]
+    if higher:
+        sys.exit(f"App Store Connect already has version {higher[0]['versionString']} "
+                 f"({higher[0]['appVersionState']}); not submitting the older {version}.")
+    submission_id, items = open_submission(app_id, replace_waiting=True)
+    if None in items.values():
+        sys.exit("An unsent submission has items other than App Store versions; "
+                 "check it in App Store Connect.")
+    if items:
+        remove_items(items)
+        # App Store Connect may drop the empty submission.
+        submission_id, _ = open_submission(app_id)
 
     version_id = app_store_version(app_id, version, app_store_versions(app_id))
     call("PATCH", f"/v1/appStoreVersions/{version_id}", body={"data": {
@@ -635,3 +675,6 @@ if __name__ == "__main__":
         if isinstance(output, bytes):
             output = output.decode(errors="replace")
         sys.exit(f"{' '.join(error.cmd)} failed:\n{output}")
+    except (urllib.error.URLError, ConnectionError, TimeoutError, ssl.SSLError,
+            http.client.HTTPException) as error:
+        sys.exit(f"Network error: {error}")

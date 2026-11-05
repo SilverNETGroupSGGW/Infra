@@ -54,7 +54,7 @@ class AppStoreMock:
         self.slow_ready = slow_ready
         self.reject_once = reject_once
         self.audience = audience
-        # HTTP statuses of the first answers.
+        # HTTP statuses of the first answers; None drops the connection.
         self.errors = list(errors)
         self.polls = 0
         self.whats_new = []
@@ -190,6 +190,8 @@ class AppStoreMock:
         self.spec.check(request)
         if self.errors:
             status = self.errors.pop(0)
+            if status is None:
+                return None, None
             return status, {"errors": [{"status": str(status), "title": "Try again"}]}
         method, path = request.method, request.path
         body = request.json() if request.raw else None
@@ -266,12 +268,23 @@ class AppStoreMock:
                                   "attributes": {"state": "READY_FOR_REVIEW"}}}
         match = re.match(r"^/v1/reviewSubmissions/([^/]+)/items$", path)
         if match:
+            # None stands for an item that is not an App Store version.
             return 200, {"data": [
-                {"type": "reviewSubmissionItems", "id": f"item{index}", "relationships": {
-                    "appStoreVersion": {"data": {"type": "appStoreVersions", "id": item}},
-                }}
+                {"type": "reviewSubmissionItems",
+                 "id": f"item-{item}" if item else f"item{index}",
+                 "relationships": {"appStoreVersion": {"data": item and {
+                     "type": "appStoreVersions", "id": item,
+                 }}}}
                 for index, item in enumerate(self.submissions[match.group(1)]["items"])
             ]}
+        match = re.match(r"^/v1/reviewSubmissionItems/item-([^/]+)$", path)
+        if match and method == "DELETE":
+            version_id = match.group(1)
+            for submission in self.submissions.values():
+                if version_id in submission["items"]:
+                    submission["items"].remove(version_id)
+            self.versions[version_id]["state"] = "PREPARE_FOR_SUBMISSION"
+            return 204, None
         if path == "/v1/reviewSubmissionItems":
             relationships = body["data"]["relationships"]
             submission_id = relationships["reviewSubmission"]["data"]["id"]
@@ -418,6 +431,44 @@ class AppStoreSubmitTest(unittest.TestCase):
         self.assertEqual(mock.versions["v-wait"]["build"], "b1")
         self.assertEqual(mock.versions["v-wait"]["state"], "WAITING_FOR_REVIEW")
         self.assertEqual(mock.submissions["rs-wait"]["state"], "COMPLETE")
+
+    def test_release_never_replaces_a_newer_version(self):
+        versions = copy.deepcopy(LIVE)
+        versions["v-next"] = {"version": "4.4.0", "state": "WAITING_FOR_REVIEW",
+                              "build": "b-next"}
+        mock = AppStoreMock(encryption=False, versions=versions, submissions={
+            "rs-wait": {"state": "WAITING_FOR_REVIEW", "items": ["v-next"]},
+        })
+        result, api = self.submit(mock, "build", "prod", notes="Poprawki")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("already has version 4.4.0", result.stderr)
+        self.assertFalse(any(call.startswith("PATCH") for call in api.calls()))
+        self.assertEqual(mock.submissions["rs-wait"]["state"], "WAITING_FOR_REVIEW")
+        self.assertEqual(mock.versions["v-next"]["version"], "4.4.0")
+
+    def test_unsent_submission_with_another_version_is_emptied(self):
+        versions = copy.deepcopy(LIVE)
+        versions["v-stale"] = {"version": "4.2.1", "state": "READY_FOR_REVIEW",
+                               "build": "b-old"}
+        mock = AppStoreMock(versions=versions, submissions={
+            "rs1": {"state": "READY_FOR_REVIEW", "items": ["v-stale"]},
+        })
+        result, api = self.submit(mock, "build", "prod", notes="Poprawki")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("DELETE /v1/reviewSubmissionItems/item-v-stale", api.calls())
+        self.assertNotIn("POST /v1/reviewSubmissions", api.calls())
+        self.assertEqual(mock.versions["v-stale"]["version"], "4.3.0")
+        self.assertEqual(mock.versions["v-stale"]["build"], "b1")
+        self.assertEqual(mock.versions["v-stale"]["state"], "WAITING_FOR_REVIEW")
+        self.assertEqual(mock.submissions["rs1"]["state"], "WAITING_FOR_REVIEW")
+
+    def test_unsent_submission_with_other_items_fails(self):
+        mock = AppStoreMock(submissions={"rs1": {"state": "READY_FOR_REVIEW",
+                                                 "items": [None]}})
+        result, api = self.submit(mock, "build", "prod", notes="Poprawki")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("other than App Store versions", result.stderr)
+        self.assertFalse(any(call.startswith("DELETE") for call in api.calls()))
 
     def test_beta_becomes_a_public_testflight_beta(self):
         mock = AppStoreMock(versions={
@@ -622,6 +673,19 @@ class AppStoreSubmitTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(f"HTTP {errors[0]}", result.stderr)
                 self.assertEqual(api.calls(), ["GET /v1/apps"] * len(errors))
+
+    def test_network_errors_on_reads_are_retried(self):
+        result, api = self.submit(AppStoreMock(errors=[None, None]), "build", "prod",
+                                  notes="x")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(api.calls()[:3], ["GET /v1/apps"] * 3)
+
+    def test_lasting_network_errors_fail(self):
+        result, api = self.submit(AppStoreMock(errors=[None] * 5), "build", "prod",
+                                  notes="x")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Network error", result.stderr)
+        self.assertEqual(api.calls(), ["GET /v1/apps"] * 5)
 
     def test_unreadable_key_fails_with_the_openssl_error(self):
         result, api = self.submit(AppStoreMock(), "build", "prod", notes="x",

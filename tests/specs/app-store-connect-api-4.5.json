@@ -5532,6 +5532,11 @@
     }
    }
   },
+  "/v1/reviewSubmissionItems/{id}": {
+   "delete": {
+    "operationId": "reviewSubmissionItems_deleteInstance"
+   }
+  },
   "/v1/reviewSubmissions": {
    "get": {
     "operationId": "reviewSubmissions_getCollection",
