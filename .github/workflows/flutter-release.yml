@@ -695,10 +695,12 @@ jobs:
             fi
           fi
           # Xcode 26's altool can exit 0 after a failed upload; check its output too.
+          # No --wait: the Linux app-store job waits for processing, at a tenth
+          # of the macOS minute price.
           API_PRIVATE_KEYS_DIR="$keys" xcrun altool --upload-package export/*.ipa \
             --platform ios --apple-id "$APPLE_APP_ID" --bundle-id "$BUNDLE_ID" \
             --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$VERSION" \
-            --api-key "$KEY_ID" --api-issuer "$ISSUER_ID" --wait 2>&1 | tee altool.log
+            --api-key "$KEY_ID" --api-issuer "$ISSUER_ID" 2>&1 | tee altool.log
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ] || grep -qE 'UPLOAD FAILED|Failed to upload' altool.log; then
             echo "::error::altool did not upload the build (exit $status); see its output above."
