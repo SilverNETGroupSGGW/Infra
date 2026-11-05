@@ -2,10 +2,13 @@
 Run by flutter-release.yml with its settings in environment variables."""
 
 import hashlib
+import http.client
 import json
 import os
+import ssl
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -25,20 +28,32 @@ class ApiError(Exception):
         self.body = body
 
 
-def call(method, url, body=None, data=None, content_type="application/json"):
+def call(method, url, body=None, data=None, content_type="application/json", retries=4):
     if body is not None:
         data = json.dumps(body).encode()
     headers = {"Authorization": "Bearer " + os.environ["ACCESS_TOKEN"]}
     if data is not None or method == "POST":
         headers["Content-Type"] = content_type
         data = data if data is not None else b""
-    request = urllib.request.Request(url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=900) as response:
-            raw = response.read()
-    except urllib.error.HTTPError as error:
-        raise ApiError(error.code, error.read().decode(errors="replace")) from None
-    return json.loads(raw) if raw else None
+    for attempt in range(retries + 1):
+        request = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=900) as response:
+                raw = response.read()
+            return json.loads(raw) if raw else None
+        except urllib.error.HTTPError as error:
+            text = error.read().decode(errors="replace")
+            # The edits insert and the track PUT are safe to send again; the
+            # bundle upload and the commit pass retries=0.
+            if error.code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(min(60, 5 * 2**attempt))
+                continue
+            raise ApiError(error.code, text) from None
+        except (OSError, http.client.HTTPException):
+            # URLError, timeouts, resets and broken responses; only reads are safe to send again.
+            if method != "GET" or attempt == retries:
+                raise
+            time.sleep(min(60, 5 * 2**attempt))
 
 
 def release_notes(tag):
@@ -53,14 +68,26 @@ def release_notes(tag):
     return notes
 
 
-def check_no_staged_rollout(edit, track):
-    """Refuses to replace a running staged rollout, which a person decides on."""
+def check_track(edit, track, version_code):
+    """Refuses to replace a running staged rollout, which a person decides on,
+    or a newer release outside beta."""
     current = call("GET", f"{API}/edits/{edit}/tracks/{track}")
     for release in current.get("releases", []):
         if release.get("status") == "inProgress":
             sys.exit(
                 f"The {track} track has a staged rollout ({release.get('name')}, "
                 f"{release['status']}); finish or halt it in Play Console first."
+            )
+        # A lower beta code is a hotfix pre-release; testers get the highest code anyway.
+        if track == BETA_TRACK:
+            continue
+        higher = [code for code in release.get("versionCodes", [])
+                  if int(code) > int(version_code)]
+        if higher:
+            sys.exit(
+                f"The {track} track already has version code {higher[0]} "
+                f"({release.get('name')}), higher than {version_code}; not "
+                "replacing it with an older build."
             )
 
 
@@ -69,12 +96,12 @@ def commit(edit):
     # and sent again together with this release.
     url = f"{API}/edits/{edit}:commit"
     try:
-        call("POST", url)
+        call("POST", url, retries=0)
     except ApiError as error:
         if "changesNotSentForReview to true" not in error.body:
             raise
         # This app's changes must be sent for review by hand in Play Console.
-        call("POST", url + "?changesNotSentForReview=true")
+        call("POST", url + "?changesNotSentForReview=true", retries=0)
         print("::notice::Send the changes for review in Play Console.")
 
 
@@ -102,6 +129,7 @@ def upload(edit, version_code):
         f"{UPLOAD_API}/edits/{edit}/bundles?uploadType=media",
         data=data,
         content_type="application/octet-stream",
+        retries=0,  # a hidden success would make the retry fail as a used version code
     )
     if str(bundle["versionCode"]) != version_code:
         sys.exit(
@@ -147,7 +175,7 @@ def main():
         release["releaseNotes"] = [
             {"language": os.environ["NOTES_LANGUAGE"], "text": notes}
         ]
-    check_no_staged_rollout(edit, track)
+    check_track(edit, track, version_code)
     call(
         "PUT",
         f"{API}/edits/{edit}/tracks/{track}",
@@ -169,3 +197,6 @@ if __name__ == "__main__":
                 "(untick 'pre-release') or tag a new version."
             )
         sys.exit(str(error))
+    except (urllib.error.URLError, ConnectionError, TimeoutError, ssl.SSLError,
+            http.client.HTTPException) as error:
+        sys.exit(f"Network error: {error}")

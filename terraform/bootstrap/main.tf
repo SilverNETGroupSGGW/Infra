@@ -248,6 +248,23 @@ resource "github_repository_environment_deployment_policy" "terraform_main" {
   branch_pattern = "main"
 }
 
+# The workflow's secrets for the plan job: no reviewers, main only.
+resource "github_repository_environment" "terraform_plan" {
+  repository  = data.github_repository.infra.name
+  environment = "terraform-plan"
+
+  deployment_branch_policy {
+    protected_branches     = false
+    custom_branch_policies = true
+  }
+}
+
+resource "github_repository_environment_deployment_policy" "terraform_plan_main" {
+  repository     = data.github_repository.infra.name
+  environment    = github_repository_environment.terraform_plan.environment
+  branch_pattern = "main"
+}
+
 # Repository variables, so the plan job reads them without an approval.
 resource "github_actions_variable" "terraform" {
   for_each = {
@@ -283,4 +300,14 @@ import {
 import {
   to = github_repository_environment_deployment_policy.terraform_main
   id = "Infra:terraform:62064227"
+}
+
+import {
+  to = github_repository_environment.terraform_plan
+  id = "Infra:terraform-plan"
+}
+
+import {
+  to = github_repository_environment_deployment_policy.terraform_plan_main
+  id = "Infra:terraform-plan:65637395"
 }

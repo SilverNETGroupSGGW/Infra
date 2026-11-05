@@ -22,7 +22,7 @@ variable "google_project_name" {
 variable "create_google_project" {
   description = "Create the project; false uses an existing one (service accounts can only create projects in a Google Cloud organization)."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "google_org_id" {
@@ -41,6 +41,11 @@ variable "environment" {
   description = "Release environment with required reviewers, passed as `environment` to flutter-release.yml; null for none (GitHub Free has no environments in private repositories)."
   type        = string
   default     = "release"
+
+  validation {
+    condition     = var.environment == null || length(var.reviewer_user_ids) + length(var.reviewer_team_ids) > 0
+    error_message = "Give the release environment a reviewer (reviewer_user_ids or reviewer_team_ids), or set environment = null."
+  }
 }
 
 variable "reviewer_user_ids" {

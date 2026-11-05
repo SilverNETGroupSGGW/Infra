@@ -71,28 +71,3 @@ provider "registry.terraform.io/integrations/github" {
     "zh:fbd1fee2c9df3aa19cf8851ce134dea6e45ea01cb85695c1726670c285797e25",
   ]
 }
-
-provider "registry.terraform.io/oliver-binns/googleplay" {
-  version     = "0.6.3"
-  constraints = ">= 0.6.3, ~> 0.6.3, < 0.7.0"
-  hashes = [
-    "h1:7INQHTJVPl86V3tlyJ2tZ6E7laLei7bTdrere5d/V5g=",
-    "h1:hOXU7KALgo34vgToNbfZn4ldzjThes0JyfvXERKN5Pw=",
-    "h1:jwTBTt4Z//53nlV3lLw5tUimvKMekzmvcXGdMu/amBI=",
-    "h1:pnmMIhHcoldnkloLMSblD9SGGfXpyVISLhLP9nGoRBc=",
-    "zh:1761dc6c9db8b836194825909489646babd782bac0eda240093409444ebdfecd",
-    "zh:2478d235f52b45b41bc5e641eb0ef89a4bd212248fb41287877779f4d4d804cd",
-    "zh:2acee35baed1091f64d42295f5516a0bbeafc87f6c1575d151b0b73fa7dd7fa3",
-    "zh:353044e6392e124d79a9e16cd28b9a5e6ebce1febce7541417d07c254901e8b0",
-    "zh:3d203e4d9b568cbfcdfa84a3f98798360ade006b1225eb89d853a5c8c284b2a6",
-    "zh:4ec2178208001c29451d68e4a27060190ecbc0984f0d4789af21d026d24ec35f",
-    "zh:5643cb9a85463e0ad385a78db83e79b80a5c173544e759625286c4641dcbbcd7",
-    "zh:890df766e9b839623b1f0437355032a3c006226a6c200cd911e15ee1a9014e9f",
-    "zh:89e98ecb07eb4b8edc3d3933768162085b19d0918a3800a6e2995c8203fa2c65",
-    "zh:8d685fcc8036c21702b30a0f8cfdf291419200b4477a23af6107bccdffb543b9",
-    "zh:99fbf4d2a7a91994eedc3ddb9df2103b5b576ab217556ccd885064c0a2c6456f",
-    "zh:a481b720e39b8c08a7fb0448aee770ced8f1040527bd1fa513989325be3e4456",
-    "zh:a9a2604a466d926c148e6f32d4c5e3f0f1530023248d86888f650e09ce82def0",
-    "zh:bdd771c30f491130dc1bebb58faeedb2dd1674004af0deb078f26dcdcac576c4",
-  ]
-}

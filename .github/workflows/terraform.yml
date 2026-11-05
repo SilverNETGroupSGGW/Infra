@@ -26,6 +26,8 @@ jobs:
     name: Plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Holds the secrets; only main can use it, and it needs no approval.
+    environment: terraform-plan
     permissions:
       contents: read # clone the repository
       id-token: write # sign in to Google Cloud (Workload Identity Federation)
@@ -53,7 +55,7 @@ jobs:
         run: |
           umask 077
           file="$RUNNER_TEMP/github-app.pem"
-          printf '%s\n' "${KEY:?Set the TF_GITHUB_APP_PRIVATE_KEY repository secret}" > "$file"
+          printf '%s\n' "${KEY:?Set the TF_GITHUB_APP_PRIVATE_KEY secret of the terraform-plan environment}" > "$file"
           echo "TF_VAR_github_app_private_key_file=$file" >> "$GITHUB_ENV"
       - id: plan
         name: Plan
@@ -62,6 +64,7 @@ jobs:
           TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
           TF_TOKEN_app_terraform_io: ${{ secrets.TF_HCP_TOKEN }}
         run: |
+          : "${TF_TOKEN_app_terraform_io:?Set the TF_HCP_TOKEN secret of the terraform-plan environment}"
           terraform init
           status=0
           # Errors still reach the log; the plan itself only the summary below.
@@ -111,10 +114,6 @@ jobs:
     permissions:
       contents: read # clone the repository
       id-token: write # sign in to Google Cloud (Workload Identity Federation)
-    env:
-      # TF_VAR_apps_folder_id: ${{ vars.TF_APPS_FOLDER_ID }} (with the Google Cloud organization)
-      TF_VAR_github_app_id: ${{ vars.TF_GITHUB_APP_ID }}
-      TF_VAR_github_app_installation_id: ${{ vars.TF_GITHUB_APP_INSTALLATION_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -133,8 +132,8 @@ jobs:
         run: |
           umask 077
           file="$RUNNER_TEMP/github-app.pem"
+          # The saved plan holds this path; the provider reads the key from it.
           printf '%s\n' "$KEY" > "$file"
-          echo "TF_VAR_github_app_private_key_file=$file" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: tfplan

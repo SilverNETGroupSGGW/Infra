@@ -51,8 +51,9 @@ concurrency:
 
 jobs:
   ci:
-    # Optional: skip while the repository is private, so CI costs no minutes.
-    if: ${{ github.event.repository.visibility == 'public' }}
+    # Optional: skip while the repository is private, so CI costs no minutes;
+    # Renovate's pull requests still run, since it merges once checks pass.
+    if: ${{ github.event.repository.visibility == 'public' || github.event.pull_request.user.login == 'renovate[bot]' }}
     permissions:
       contents: read # clone the repository
     uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-ci.yml@<commit-sha> # v1.0.0
@@ -182,8 +183,9 @@ them.
   release sorts after its pre-releases. `X` goes up to 2099, `Y` and `Z` up to
   99 and `N` from 1 to 98, and the pre-releases of a version need different
   numbers across all labels (`beta.1`, `beta.2`, `rc.3`); the run checks the
-  version's other tags before building. The version in `pubspec.yaml` is only
-  used by local builds.
+  version's other tags before building, and refuses a pre-release once the
+  version has a tag without a label (`1.2.0`). The version in `pubspec.yaml` is
+  only used by local builds.
 - **Beta:** publish a GitHub release with "Set as a pre-release" ticked. The
   workflow builds signed per-ABI APKs, an App Bundle and the web app and
   attaches them to the release. Google Play gets the bundle on the open
@@ -195,7 +197,8 @@ them.
   Google Play gets it on the production track, App Review gets the iOS build
   (released once approved), and Pages serves it at the site root. An earlier
   version still waiting for App Review is withdrawn and replaced, as Google
-  Play does; one that App Review has started stops the run.
+  Play does; one that App Review has started stops the run. A production
+  release older than the version a store already has stops that store's job.
 - **Closed and internal tests** are not automated: upload the builds attached
   to a release in Play Console and App Store Connect.
 - **Promotion:** untick "Set as a pre-release" on a tested pre-release. The
@@ -213,8 +216,10 @@ them.
 - **Release notes:** the release description becomes the store release notes
   (Google Play: up to 500 characters; App Store: "What's New" in every
   language).
-- **Re-runs** continue where a run stopped: an uploaded bundle is not uploaded
-  again, and an unfinished App Store submission is completed.
+- **Re-runs:** "Re-run failed jobs" continues where a run stopped: an uploaded
+  bundle is not uploaded again, and an unfinished App Store submission is
+  completed. "Re-run all jobs" on a pre-release whose builds are attached stops
+  at once, since the stores refuse a build number twice.
 
 Don't enable immutable releases in the app repositories: the builds are
 attached after the release is published.
@@ -223,9 +228,9 @@ attached after the release is published.
 
 - `cache-mode: none`: nothing from the Actions cache, which other workflows
   can write, reaches a signed build.
-- Only the `publish` job can write to the repository, and it runs no build
-  code. The upload key is only in the Android job; the App Store Connect key
-  only in jobs that run no project build code.
+- Only the `publish` and `rename` jobs can write to the repository, and they
+  run no build code. The upload key is only in the Android job; the App Store
+  Connect key only in jobs that run no project build code.
 - Google Play uses Workload Identity Federation: no Google key is stored, and
   the provider can require that the token comes from this workflow (below).
 - Set `environment` to an environment with required reviewers to approve
@@ -271,7 +276,7 @@ gh api -X POST -f name='*' -f type=tag \
 ### Renovate
 
 `.github/renovate.json5` in the app, with non-major updates merged once CI
-passes:
+passes and the update is three days old:
 
 ```json5
 {
@@ -285,16 +290,16 @@ passes:
       rangeStrategy: 'bump',
     },
     {
-      matchUpdateTypes: ['minor', 'patch', 'pin', 'digest'],
+      matchUpdateTypes: ['minor', 'patch', 'digest'],
+      minimumReleaseAge: '3 days',
       automerge: true,
     },
   ],
 }
 ```
 
-Renovate counts a skipped check as passed, so a CI caller that skips private
-repositories must still run on Renovate's pull requests
-(`github.event.pull_request.user.login == 'renovate[bot]'`).
+Renovate counts a skipped check as passed, so the CI caller above runs on its
+pull requests even in a private repository.
 
 ## Task contract
 
@@ -320,6 +325,9 @@ Also:
   (`build/app/outputs/flutter-apk/app-<abi>-release.apk`,
   `build/app/outputs/bundle/release/app-release.aab`, `build/web`), and the
   web build keeps `<base href="/">`, which Pages points at the site's paths.
+  The release workflow's Android and web jobs install only the `build-tools`
+  mise tools (default `flutter,java`; CI installs all of them), so
+  `build:apk`, `build:appbundle` and `build:web` must work with only those.
 - **Android signing:** the release workflow writes the upload keystore to
   `android-keystore-path` and sets `KEY_ALIAS`, `KEY_PASSWORD` and
   `STORE_PASSWORD`. The app's Gradle release signing reads them; without them
@@ -382,7 +390,8 @@ administrator sets this up once:
 
 1. Have the club's HCP Terraform organization `KN-Silver` (free plan; the
    bootstrap imports it) and a team API token for the workflow, stored as the
-   `TF_HCP_TOKEN` secret (Settings → Teams → owners → Team API token).
+   `TF_HCP_TOKEN` secret of the `terraform-plan` and `terraform` environments
+   (Settings → Teams → owners → Team API token).
 2. Create the GitHub App in the organization's settings (Developer settings →
    GitHub Apps): no webhook, repository permissions Administration and
    Variables (read and write); install it on the app repositories only and
@@ -391,7 +400,8 @@ administrator sets this up once:
    accounts. It creates the `apps` workspace in HCP Terraform, the
    `silvernet-infra` project with the Terraform service account and its
    sign-in, its rights on the apps' projects (and their display names), the
-   `terraform` environment and the workflow's repository variables:
+   `terraform-plan` and `terraform` environments (main only) and the
+   workflow's repository variables:
 
    ```sh
    gcloud auth application-default login --scopes=openid,\
@@ -405,9 +415,21 @@ administrator sets this up once:
    terraform init
    terraform apply -var github_app_id=APP_ID \
      -var github_app_installation_id=INSTALLATION_ID
-   gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
-     < private-key.pem
-   gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra
+   for env in terraform-plan terraform; do
+     gh secret set TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra \
+       --env "$env" < private-key.pem
+     gh secret set TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra --env "$env"
+   done
+   ```
+
+   Environment secrets reach only the workflow's jobs on `main`. A setup
+   from before the `terraform-plan` environment also has these two as
+   repository secrets, which every branch can read; once the loop above has
+   run, delete them:
+
+   ```sh
+   gh secret delete TF_GITHUB_APP_PRIVATE_KEY --repo SilverNETGroupSGGW/Infra
+   gh secret delete TF_HCP_TOKEN --repo SilverNETGroupSGGW/Infra
    ```
 
    If the Play Console call fails because the API is not enabled, run
@@ -490,7 +512,7 @@ App Store Connect job; re-run the job once that review is done.
 
 ```sh
 mise install
-mise run lint  # actionlint, zizmor, taplo, rumdl, gitleaks
+mise run lint  # actionlint, zizmor, taplo, rumdl, terraform, gitleaks
 mise run test  # the store scripts against local mocks of the store APIs
 ```
 

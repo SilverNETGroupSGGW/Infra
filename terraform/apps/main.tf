@@ -25,18 +25,14 @@ terraform {
       source  = "hashicorp/google-beta"
       version = "~> 8.5"
     }
-    googleplay = {
-      source  = "oliver-binns/googleplay"
-      version = "~> 0.6.3"
-    }
   }
 }
 
 # With an organization, new apps can get projects in the apps folder:
-# uncomment this, set google_folder_id and drop create_google_project.
+# uncomment this, set google_folder_id and create_google_project = true.
 #
 # variable "apps_folder_id" {
-#   description = "Google Cloud folder of the apps' projects (TF_APPS_FOLDER_ID of the terraform environment)."
+#   description = "Google Cloud folder of the apps' projects (the TF_APPS_FOLDER_ID repository variable)."
 #   type        = string
 # }
 
@@ -75,10 +71,6 @@ provider "google-beta" {
   user_project_override = true
 }
 
-provider "googleplay" {
-  developer_id = "8827645756827128332" # KN Silver .NET
-}
-
 locals {
   apple = {
     team_id   = "MZMZBQPXAR"
@@ -89,9 +81,8 @@ locals {
 module "plan_wzim" {
   source = "../app-release"
 
-  repository            = "SilverTimetable2"
-  google_project_id     = "silvertimetable-bea41"
-  create_google_project = false # the app's Firebase project
+  repository        = "SilverTimetable2"
+  google_project_id = "silvertimetable-bea41"
   # google_folder_id    = var.apps_folder_id
   # GitHub Free: no environments in private repos; "release" once public.
   environment       = null
@@ -110,9 +101,8 @@ module "plan_wzim" {
 module "dni_sggw" {
   source = "../app-release"
 
-  repository            = "sggw_days"
-  google_project_id     = "sggw-days"
-  create_google_project = false # the app's Firebase project
+  repository        = "sggw_days"
+  google_project_id = "sggw-days"
   # google_folder_id    = var.apps_folder_id
   environment = null
 
@@ -128,45 +118,14 @@ module "dni_sggw" {
 # module "kampus_sggw" {
 #   source = "../app-release"
 #
-#   repository            = "kampus_sggw"
-#   google_project_id     = "kampus-sggw-2021"
-#   create_google_project = false # the app's Firebase project
+#   repository        = "kampus_sggw"
+#   google_project_id = "kampus-sggw-2021"
 #   # google_folder_id    = var.apps_folder_id
 #   environment = null
 #
 #   apple_team_id               = local.apple.team_id
 #   app_store_connect_issuer_id = local.apple.issuer_id
 # }
-
-# Play's users API refuses the Terraform account, so the release accounts'
-# Play Console access is granted by hand; forget it without deleting it.
-removed {
-  from = module.plan_wzim.googleplay_user.releases
-  lifecycle {
-    destroy = false
-  }
-}
-
-removed {
-  from = module.plan_wzim.googleplay_app_iam.releases
-  lifecycle {
-    destroy = false
-  }
-}
-
-removed {
-  from = module.dni_sggw.googleplay_user.releases
-  lifecycle {
-    destroy = false
-  }
-}
-
-removed {
-  from = module.dni_sggw.googleplay_app_iam.releases
-  lifecycle {
-    destroy = false
-  }
-}
 
 # Variables set by hand before Terraform managed them.
 import {

@@ -16,7 +16,8 @@ SPECS = Path(__file__).resolve().parent / "specs"
 
 class MockApi:
     """Local HTTP server recording requests and answering with handler(request);
-    an exception handler raises goes to errors and is answered with HTTP 400."""
+    an exception handler raises goes to errors and is answered with HTTP 400,
+    and an answer of (None, None) drops the connection."""
 
     def __init__(self, handler):
         self.handler = handler
@@ -44,13 +45,16 @@ class MockApi:
                 except Exception as error:  # noqa: BLE001 - reported by the test
                     mock.errors.append(f"{request}: {error}")
                     status, body = 400, {"error": {"message": f"mock: {error}"}}
+                if status is None:
+                    # HTTP/1.0 closes the connection: the client gets no answer.
+                    return
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 if body is not None:
                     self.wfile.write(json.dumps(body).encode())
 
-            do_GET = do_POST = do_PUT = do_PATCH = handle_request
+            do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = handle_request
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.server.server_port}"

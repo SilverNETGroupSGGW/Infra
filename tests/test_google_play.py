@@ -26,16 +26,25 @@ BETA_TRACK = {
 class PlayMock:
     """Answers like the Play Developer API for a given state of the app."""
 
-    def __init__(self, bundles=None, tracks=None, used=False, manual_review=False):
+    def __init__(self, bundles=None, tracks=None, used=False, manual_review=False,
+                 errors=()):
         self.bundles = bundles or {}  # version code -> sha256
         self.tracks = tracks or {}
         self.used = used
         self.manual_review = manual_review
         self.spec = PlaySpec()
         self.puts = []
+        # The first answers: 200 answers normally, None drops the connection
+        # and another status is an error.
+        self.errors = list(errors)
 
     def __call__(self, request):
         assert request.headers["Authorization"] == "Bearer token"
+        status = self.errors.pop(0) if self.errors else 200
+        if status is None:
+            return None, None
+        if status != 200:
+            return status, {"error": {"code": status, "message": "Try again"}}
         path, query = request.path, request.query
         if request.method == "POST" and path == EDITS:
             assert request.json() == {}
@@ -99,7 +108,7 @@ class GooglePlayTest(unittest.TestCase):
             "PATH": f"{self.dir}{os.pathsep}{os.environ['PATH']}",
         }
         values.update(env)
-        result = run_script("google_play.py", dict(os.environ, **values))
+        result = run_script("google_play.py", dict(os.environ, **values), skip_sleep=True)
         self.assertEqual(api.errors, [], result.stderr)
         return result, api
 
@@ -247,6 +256,28 @@ class GooglePlayTest(unittest.TestCase):
         self.assertIn("staged rollout", result.stderr)
         self.assertEqual(mock.puts, [])
 
+    def test_release_never_replaces_a_newer_version_code(self):
+        mock = PlayMock(tracks={"beta": BETA_TRACK, "production": {
+            "track": "production",
+            "releases": [{"name": "v4.4.0", "versionCodes": ["4040099"],
+                          "status": "completed"}],
+        }})
+        result, api = self.run_play(mock, MODE="promote", TRACK="production",
+                                    TAG="v4.3.0-beta.1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("higher than 4030001", result.stderr)
+        self.assertEqual(mock.puts, [])
+        self.assertNotIn(f"POST {EDITS}/e1:commit", api.calls())
+
+    def test_beta_takes_a_lower_version_code(self):
+        mock = PlayMock(tracks={"beta": {"track": "beta", "releases": [{
+            "name": "v4.4.0-beta.1", "versionCodes": ["4040001"], "status": "completed",
+        }]}})
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(mock.puts[0]["releases"][0]["versionCodes"], ["4030001"])
+        self.assertEqual(api.calls()[-1], f"POST {EDITS}/e1:commit")
+
     def test_halted_rollout_is_replaced(self):
         mock = PlayMock(tracks={"beta": BETA_TRACK, "production": {
             "track": "production",
@@ -272,6 +303,32 @@ class GooglePlayTest(unittest.TestCase):
         result, _ = self.run_play(mock, MODE="promote", TRACK="production", TAG="4.3.0-rc1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(mock.puts[0]["releases"][0]["name"], "4.3.0")
+
+    def test_rate_limits_and_server_errors_are_retried(self):
+        mock = PlayMock(errors=[429, 503])
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(api.calls()[:3], [f"POST {EDITS}"] * 3)
+
+    def test_commit_is_not_sent_again(self):
+        mock = PlayMock(errors=[200, 200, 200, 200, 200, 503])
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(api.calls().count(f"POST {EDITS}/e1:commit"), 1)
+
+    def test_network_errors_on_reads_are_retried(self):
+        mock = PlayMock(errors=[200, None])
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(api.calls()[1:3], [f"GET {EDITS}/e1/bundles"] * 2)
+
+    def test_network_error_on_a_write_is_not_retried(self):
+        mock = PlayMock(errors=[None])
+        result, api = self.run_play(mock, MODE="build", TRACK="beta", TAG="v4.3.0-beta.1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Network error", result.stderr)
+        self.assertEqual(api.calls(), [f"POST {EDITS}"])
+
 
 if __name__ == "__main__":
     unittest.main()

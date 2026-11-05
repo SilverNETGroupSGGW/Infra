@@ -63,6 +63,7 @@ jobs:
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles(format('{0}/pubspec.lock', inputs.app-dir)) }}
+          restore-keys: pub-${{ runner.os }}-
       - name: Lint and test
         run: mise run check
       - if: ${{ inputs.codegen }}
@@ -95,6 +96,7 @@ jobs:
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles(format('{0}/pubspec.lock', inputs.app-dir)) }}
+          restore-keys: pub-${{ runner.os }}-
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-provider: basic
@@ -129,6 +131,7 @@ jobs:
         with:
           path: ~/.pub-cache
           key: pub-${{ runner.os }}-${{ hashFiles(format('{0}/pubspec.lock', inputs.app-dir)) }}
+          restore-keys: pub-${{ runner.os }}-
       - name: Build web
         run: mise run build:web
 
