@@ -38,6 +38,18 @@
       "automerge": true
     },
     {
+      "description": "Each Python 3.x minor is a new ABI and wheels lag for weeks, so it gets its own PR and waits for a review instead of blocking the non-major group",
+      "matchPackageNames": [
+        "python",
+        "python/cpython"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "groupName": "python",
+      "automerge": false
+    },
+    {
       "description": "Renovate skips indirect Go modules by default; keep them current in one PR",
       "matchManagers": [
         "gomod"
