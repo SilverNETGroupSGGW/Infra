@@ -26,6 +26,8 @@ jobs:
     name: Plan
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Holds the secrets; only main can use it, and it needs no approval.
+    environment: terraform-plan
     permissions:
       contents: read # clone the repository
       id-token: write # sign in to Google Cloud (Workload Identity Federation)
@@ -53,7 +55,7 @@ jobs:
         run: |
           umask 077
           file="$RUNNER_TEMP/github-app.pem"
-          printf '%s\n' "${KEY:?Set the TF_GITHUB_APP_PRIVATE_KEY repository secret}" > "$file"
+          printf '%s\n' "${KEY:?Set the TF_GITHUB_APP_PRIVATE_KEY secret of the terraform-plan environment}" > "$file"
           echo "TF_VAR_github_app_private_key_file=$file" >> "$GITHUB_ENV"
       - id: plan
         name: Plan
@@ -62,6 +64,7 @@ jobs:
           TF_CLOUD_ORGANIZATION: ${{ vars.TF_CLOUD_ORGANIZATION }}
           TF_TOKEN_app_terraform_io: ${{ secrets.TF_HCP_TOKEN }}
         run: |
+          : "${TF_TOKEN_app_terraform_io:?Set the TF_HCP_TOKEN secret of the terraform-plan environment}"
           terraform init
           status=0
           # Errors still reach the log; the plan itself only the summary below.
