@@ -75,10 +75,6 @@ on:
       APP_STORE_CONNECT_KEY:
         description: Contents of the App Store Connect API key (.p8), Admin role.
         required: false
-    outputs:
-      mode:
-        description: build, promote or skip.
-        value: ${{ jobs.plan.outputs.mode }}
 
 permissions: {}
 
@@ -171,9 +167,19 @@ jobs:
               exit 1
             fi
           else
+            assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            built=false
+            if grep -qxF -e "$PREFIX-$TAG.aab" -e "$PREFIX-${TAG%%-*}.aab" <<< "$assets"; then built=true; fi
             # The pre-release checkbox picks the testers, not the tag.
             case "$ACTION/$PRERELEASE" in
-              published/true) mode=build channel=beta play_track=$BETA_TRACK ;;
+              published/true)
+                # "Re-run all jobs" would build again; the stores refuse a build number twice.
+                if [ "$built" = true ]; then
+                  echo "::error::$TAG already has its builds; use \"Re-run failed jobs\" to continue its run."
+                  exit 1
+                fi
+                mode=build channel=beta play_track=$BETA_TRACK
+                ;;
               published/false)
                 mode=skip channel=prod
                 echo "::notice::GitHub also sends \"released\" for a release; that run publishes $TAG."
@@ -182,12 +188,7 @@ jobs:
                 # Sent for a new release and for a pre-release turned into one;
                 # only the second has a beta's builds to promote.
                 channel=prod play_track=production
-                assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
-                if grep -qxF -e "$PREFIX-$TAG.aab" -e "$PREFIX-${TAG%%-*}.aab" <<< "$assets"; then
-                  mode=promote
-                else
-                  mode=build
-                fi
+                if [ "$built" = true ]; then mode=promote; else mode=build; fi
                 ;;
               *)
                 echo "::error::Unexpected release action $ACTION."
@@ -195,13 +196,21 @@ jobs:
                 ;;
             esac
           fi
-          # Pre-releases of a version with the same N share a build number.
+          # A pre-release needs its own N among the version's pre-releases, and none
+          # can follow the version's own tag (N = 99).
           if [ "$mode" = build ] && [ -n "$pre" ]; then
             refs='.[].ref | ltrimstr("refs/tags/")'
-            others=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$version-" --jq "$refs" &&
-              gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$version-" --jq "$refs")
+            others=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$version" --jq "$refs" &&
+              gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/v$version" --jq "$refs")
             for other in $others; do
-              if [ "$other" != "$TAG" ] && [[ $other =~ $semver ]] && [ "${BASH_REMATCH[6]}" = "$number" ]; then
+              # The prefix 1.2.1 also matches 1.2.10.
+              [ "$other" != "$TAG" ] && [[ $other =~ $semver ]] || continue
+              [ "${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${BASH_REMATCH[3]}" = "$version" ] || continue
+              if [ -z "${BASH_REMATCH[4]}" ]; then
+                echo "::error::$other is already tagged, so the stores take no more builds of $version. Delete this release and tag a higher version."
+                exit 1
+              fi
+              if [ "${BASH_REMATCH[6]}" = "$number" ]; then
                 echo "::error::$other already has build number $build_number: the pre-releases of a version need different numbers (beta.1, beta.2, rc.3). Delete this release and publish it again with a new tag."
                 exit 1
               fi
@@ -352,7 +361,7 @@ jobs:
           printf '\nversion: %s\n' "$VERSION" >> pubspec.yaml
       - name: Build
         env:
-          CHANNEL: ${{ needs.plan.outputs.channel == 'prod' && 'prod' || 'beta' }}
+          CHANNEL: ${{ needs.plan.outputs.channel }}
         run: mise run build:web --channel "$CHANNEL"
       - name: Zip the build
         env:
@@ -375,8 +384,8 @@ jobs:
     needs: [plan, android, web]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    # Only this job can write to the repository. The build jobs run third-party
-    # build code (Gradle plugins, Dart build hooks); this one runs none.
+    # Only this job and rename can write to the repository. The build jobs run
+    # third-party build code (Gradle plugins, Dart build hooks); these two run none.
     permissions:
       contents: write # attach the builds to the release
     steps:
