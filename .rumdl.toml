@@ -1,3 +1,4 @@
-# The README shows workflow snippets whose `uses:` lines cannot be wrapped.
+# The README and docs/ show workflow snippets whose `uses:` lines cannot be
+# wrapped.
 [MD013]
 code-blocks = false

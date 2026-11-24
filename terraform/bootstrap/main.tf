@@ -1,11 +1,11 @@
 # One-time setup for the Terraform workflow, applied by an administrator
-# (README.md, "Terraform in CI"). It links no billing account.
+# (docs/terraform.md, "Terraform in CI"). It links no billing account.
 
 terraform {
   required_version = ">= 1.11"
 
   # State in HCP Terraform; plan and apply run on the admin's machine with
-  # the admin's accounts (local execution mode, README.md).
+  # the admin's accounts (local execution mode, docs/terraform.md).
   cloud {
     organization = "KN-Silver"
 
@@ -134,7 +134,7 @@ resource "tfe_workspace_settings" "apps" {
 }
 
 # This configuration's own state. `terraform init` creates the workspace; it
-# must be set to local before the first plan (README.md).
+# must be set to local before the first plan (docs/terraform.md).
 resource "tfe_workspace" "bootstrap" {
   organization = tfe_organization.silver.name
   name         = "bootstrap"
