@@ -1,6 +1,6 @@
 name: Flutter CI
 
-# Reusable: lint, test and build a Flutter app with its mise tasks (README.md).
+# Reusable: lint, test and build a Flutter app with its mise tasks (docs/ci.md).
 
 on:
   workflow_call:
@@ -101,7 +101,7 @@ jobs:
         with:
           cache-provider: basic
       # Without signing secrets the app's release build has to fall back to a
-      # debug or unsigned key (see README.md, "Task contract").
+      # debug or unsigned key (see docs/task-contract.md).
       - name: Build release APKs
         run: mise run build:apk
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
