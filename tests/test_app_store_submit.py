@@ -360,7 +360,7 @@ class AppStoreSubmitTest(unittest.TestCase):
             "CHANNEL": channel,
             "USES_NON_EXEMPT_ENCRYPTION": encryption,
             "FAKE_NOTES": notes,
-            "GITHUB_REPOSITORY": "owner/repo",
+            "APP_REPOSITORY": "owner/repo",
             "GITHUB_STEP_SUMMARY": str(self.dir / "summary.md"),
             "PATH": f"{self.dir}{os.pathsep}{os.environ['PATH']}",
         }

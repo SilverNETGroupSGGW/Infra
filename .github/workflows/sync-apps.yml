@@ -1,0 +1,59 @@
+name: Sync apps
+
+# Applies apps.yaml: per-app release accounts, Play access and upload keys
+# (docs/apps.md). Runs from main only (the sync-apps environment); run it by
+# hand after a first manual Play upload or any manual change.
+
+on:
+  push:
+    branches: [main]
+    paths: [apps.yaml]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: sync-apps
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: sync-apps
+    permissions:
+      contents: read # clone the repository
+      id-token: write # sign in to Google Cloud (Workload Identity Federation)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: projects/389882651708/locations/global/workloadIdentityPools/github/providers/infra-sync-apps
+          service_account: sync-apps@silvernet-infra.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+          export_environment_variables: false
+      # The Silver Sync App: reads repository IDs and secret names, sets the
+      # upload-key secrets. Not scoped to the apps.yaml repositories, so one
+      # wrong repo name fails only its own app, not the token for all of them.
+      - id: app
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: Iv23li5R9yvnf6JONdKp
+          private-key: ${{ secrets.SYNC_APP_PRIVATE_KEY }}
+          owner: SilverNETGroupSGGW # zizmor: ignore[github-app]
+          permission-secrets: write
+          permission-environments: read
+          permission-metadata: read
+      - name: Sync
+        env:
+          GOOGLE_TOKEN: ${{ steps.auth.outputs.access_token }}
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: |
+          yq -o=json apps.yaml > "$RUNNER_TEMP/apps.json"
+          python3 scripts/sync_apps.py "$RUNNER_TEMP/apps.json"

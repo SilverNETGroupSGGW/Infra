@@ -13,6 +13,8 @@ rumdl = "0.2.78"
 shellcheck = "0.11.0"
 taplo = "0.10.0"
 terraform = "1.16.5"
+# Converts apps.yaml to JSON for scripts/apps.py.
+yq = "4.54.3"
 zizmor = "1.30.1"
 
 [tasks."lint:actions"]
@@ -34,6 +36,10 @@ run = [
   "for dir in app-release apps bootstrap; do terraform -chdir=terraform/$dir init -backend=false -input=false -no-color > /dev/null && terraform -chdir=terraform/$dir validate -no-color || exit 1; done",
 ]
 
+[tasks."lint:apps"]
+description = "Validate apps.yaml"
+run = 'yq -o=json apps.yaml > "${TMPDIR:-/tmp}/apps.json" && python3 scripts/apps.py check "${TMPDIR:-/tmp}/apps.json"'
+
 [tasks."lint:secrets"]
 description = "Scan the whole git history for committed secrets"
 run = "gitleaks git --no-banner --redact ."
@@ -45,6 +51,7 @@ depends = [
   "lint:toml",
   "lint:markdown",
   "lint:terraform",
+  "lint:apps",
   "lint:secrets",
 ]
 

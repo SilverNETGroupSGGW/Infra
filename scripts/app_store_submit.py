@@ -1,5 +1,6 @@
 """Sends an App Store Connect build to TestFlight or App Review.
-Run by flutter-release.yml with its settings in environment variables."""
+Run by Infra's app-store.yml with its settings in environment variables;
+APP_REPOSITORY is the app's repository, whose GitHub release has the notes."""
 
 import base64
 import http.client
@@ -137,7 +138,7 @@ def call(method, path, params=None, body=None, retries=4):
 
 def release_notes(tag):
     notes = subprocess.run(
-        ["gh", "release", "view", tag, "--repo", os.environ["GITHUB_REPOSITORY"],
+        ["gh", "release", "view", tag, "--repo", os.environ["APP_REPOSITORY"],
          "--json", "body", "--jq", ".body"],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
@@ -389,9 +390,8 @@ def summarize(line):
             file.write(line + "\n")
 
 
-def public_beta(app, build, name):
+def public_beta(app, build, name, notes):
     """Gives the build to the public TestFlight group after Beta App Review."""
-    notes = release_notes(os.environ["TAG"])
     if notes:
         set_what_to_test(build["id"], app["attributes"]["primaryLocale"], notes)
     fill_test_information(app["id"], app["attributes"]["primaryLocale"])
@@ -560,6 +560,8 @@ def main():
     promote = os.environ["MODE"] == "promote"
     beta = os.environ["CHANNEL"] == "beta"
     name = f"{version} ({build_number})"
+    # Read before the wait for processing: the App token that reads it lasts an hour.
+    notes = release_notes(os.environ["TAG"])
 
     apps = call("GET", "/v1/apps", {
         "filter[bundleId]": bundle_id, "fields[apps]": "bundleId,primaryLocale",
@@ -574,7 +576,7 @@ def main():
     if build["attributes"].get("buildAudienceType") == "INTERNAL_ONLY":
         sys.exit("The build is for internal TestFlight testing only.")
     if beta:
-        public_beta(app, build, name)
+        public_beta(app, build, name, notes)
         return
 
     versions = app_store_versions(app_id)
@@ -599,7 +601,6 @@ def main():
     is_update = any(
         v["attributes"]["appVersionState"] == "READY_FOR_DISTRIBUTION" for v in versions
     )
-    notes = release_notes(os.environ["TAG"]) if is_update else ""
     if is_update and not notes:
         sys.exit(
             "App Store updates need \"What's New\": write it in the GitHub "

@@ -20,6 +20,79 @@
    },
    "type": "object"
   },
+  "Grant": {
+   "description": "An access grant resource.",
+   "id": "Grant",
+   "properties": {
+    "appLevelPermissions": {
+     "description": "The permissions granted to the user for this app.",
+     "items": {
+      "enum": [
+       "APP_LEVEL_PERMISSION_UNSPECIFIED",
+       "CAN_ACCESS_APP",
+       "CAN_VIEW_FINANCIAL_DATA",
+       "CAN_MANAGE_PERMISSIONS",
+       "CAN_REPLY_TO_REVIEWS",
+       "CAN_MANAGE_PUBLIC_APKS",
+       "CAN_MANAGE_TRACK_APKS",
+       "CAN_MANAGE_TRACK_USERS",
+       "CAN_MANAGE_PUBLIC_LISTING",
+       "CAN_MANAGE_DRAFT_APPS",
+       "CAN_MANAGE_ORDERS",
+       "CAN_MANAGE_APP_CONTENT",
+       "CAN_VIEW_NON_FINANCIAL_DATA",
+       "CAN_VIEW_APP_QUALITY",
+       "CAN_MANAGE_DEEPLINKS"
+      ],
+      "enumDeprecated": [
+       false,
+       true,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false
+      ],
+      "enumDescriptions": [
+       "Unknown or unspecified permission.",
+       "View app information (read-only). Deprecated: Try defining a more granular capability. Otherwise, check AppLevelPermission.CAN_VIEW_NON_FINANCIAL_DATA.",
+       "View financial data.",
+       "Admin (all permissions).",
+       "Reply to reviews.",
+       "Release to production, exclude devices, and use app signing by Google Play.",
+       "Release to testing tracks.",
+       "Manage testing tracks and edit tester lists.",
+       "Manage store presence.",
+       "Edit and delete draft apps.",
+       "Manage orders and subscriptions.",
+       "Manage policy related pages.",
+       "View app information (read-only).",
+       "View app quality data such as Vitals, Crashes etc.",
+       "Manage the deep links setup of an app."
+      ],
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "name": {
+     "description": "Required. Resource name for this grant, following the pattern \"developers/{developer}/users/{email}/grants/{package_name}\". If this grant is for a draft app, the app ID will be used in this resource name instead of the package name.",
+     "type": "string"
+    },
+    "packageName": {
+     "description": "Immutable. The package name of the app. This will be empty for draft apps.",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
   "LocalizedText": {
    "description": "Localized text in given language.",
    "id": "LocalizedText",
@@ -107,6 +180,134 @@
       "type": "string"
      },
      "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "User": {
+   "description": "A user resource.",
+   "id": "User",
+   "properties": {
+    "accessState": {
+     "description": "Output only. The state of the user's access to the Play Console.",
+     "enum": [
+      "ACCESS_STATE_UNSPECIFIED",
+      "INVITED",
+      "INVITATION_EXPIRED",
+      "ACCESS_GRANTED",
+      "ACCESS_EXPIRED"
+     ],
+     "enumDescriptions": [
+      "Unknown or unspecified access state.",
+      "User is invited but has not yet accepted the invitation.",
+      "Invitation has expired.",
+      "User has accepted an invitation and has access to the Play Console.",
+      "Account access has expired."
+     ],
+     "readOnly": true,
+     "type": "string"
+    },
+    "developerAccountPermissions": {
+     "description": "Permissions for the user which apply across the developer account.",
+     "items": {
+      "enum": [
+       "DEVELOPER_LEVEL_PERMISSION_UNSPECIFIED",
+       "CAN_SEE_ALL_APPS",
+       "CAN_VIEW_FINANCIAL_DATA_GLOBAL",
+       "CAN_MANAGE_PERMISSIONS_GLOBAL",
+       "CAN_EDIT_GAMES_GLOBAL",
+       "CAN_PUBLISH_GAMES_GLOBAL",
+       "CAN_REPLY_TO_REVIEWS_GLOBAL",
+       "CAN_MANAGE_PUBLIC_APKS_GLOBAL",
+       "CAN_MANAGE_TRACK_APKS_GLOBAL",
+       "CAN_MANAGE_TRACK_USERS_GLOBAL",
+       "CAN_MANAGE_PUBLIC_LISTING_GLOBAL",
+       "CAN_MANAGE_DRAFT_APPS_GLOBAL",
+       "CAN_CREATE_MANAGED_PLAY_APPS_GLOBAL",
+       "CAN_CHANGE_MANAGED_PLAY_SETTING_GLOBAL",
+       "CAN_MANAGE_ORDERS_GLOBAL",
+       "CAN_MANAGE_APP_CONTENT_GLOBAL",
+       "CAN_VIEW_NON_FINANCIAL_DATA_GLOBAL",
+       "CAN_VIEW_APP_QUALITY_GLOBAL",
+       "CAN_MANAGE_DEEPLINKS_GLOBAL",
+       "CAN_VIEW_CONNECTED_APPS_GLOBAL",
+       "CAN_EDIT_CONNECTED_APPS_GLOBAL"
+      ],
+      "enumDeprecated": [
+       false,
+       true,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       true,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false,
+       false
+      ],
+      "enumDescriptions": [
+       "Unknown or unspecified permission.",
+       "View app information and download bulk reports (read-only). Deprecated: Check CAN_VIEW_NON_FINANCIAL_DATA_GLOBAL.",
+       "View financial data, orders, and cancellation survey responses.",
+       "Admin (all permissions).",
+       "Edit Play Games Services projects.",
+       "Publish Play Games Services projects.",
+       "Reply to reviews.",
+       "Release to production, exclude devices, and use app signing by Google Play.",
+       "Release to testing tracks.",
+       "Manage testing tracks and edit tester lists.",
+       "Manage store presence.",
+       "Create, edit, and delete draft apps.",
+       "Create and publish private apps to your organization.",
+       "Deprecated: This permission is no longer supported. Choose whether apps are public, or only available to your organization.",
+       "Manage orders and subscriptions.",
+       "Manage policy related pages on all apps for the developer.",
+       "View app information and download bulk reports (read-only).",
+       "View app quality information for all apps for the developer.",
+       "Manage the deep links setup for all apps for the developer.",
+       "Allows viewing connected apps in the Google Play Console.",
+       "Allows editing connected apps in the Google Play Console."
+      ],
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "email": {
+     "description": "Immutable. The user's email address.",
+     "type": "string"
+    },
+    "expirationTime": {
+     "description": "The time at which the user's access expires, if set. When setting this value, it must always be in the future.",
+     "format": "google-datetime",
+     "type": "string"
+    },
+    "grants": {
+     "description": "Output only. Per-app permissions for the user.",
+     "items": {
+      "$ref": "Grant"
+     },
+     "readOnly": true,
+     "type": "array"
+    },
+    "name": {
+     "description": "Required. Resource name for this user, following the pattern \"developers/{developer}/users/{email}\".",
+     "type": "string"
+    },
+    "partial": {
+     "description": "Output only. Whether there are more permissions for the user that are not represented here. This can happen if the caller does not have permission to manage all apps in the account. This is also `true` if this user is the account owner. If this field is `true`, it should be taken as a signal that this user cannot be fully managed via the API. That is, the API caller is not be able to manage all of the permissions this user holds, either because it doesn't know about them or because the user is the account owner.",
+     "readOnly": true,
+     "type": "boolean"
     }
    },
    "type": "object"
