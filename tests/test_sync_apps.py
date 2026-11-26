@@ -16,6 +16,9 @@ DEV = "8827645756827128332"
 IAM = "/v1/projects/silvernet-infra/serviceAccounts"
 USERS = f"/androidpublisher/v3/developers/{DEV}/users"
 PERMISSIONS = ["CAN_MANAGE_PUBLIC_APKS", "CAN_MANAGE_TRACK_APKS"]
+# What Play stores for a grant of PERMISSIONS: it adds two read-only ones.
+IMPLIED = ["CAN_VIEW_NON_FINANCIAL_DATA", "CAN_VIEW_APP_QUALITY"]
+STORED = PERMISSIONS + IMPLIED
 ROLE = "roles/iam.workloadIdentityUser"
 SECRET_NAMES = ["ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD", "ANDROID_STORE_PASSWORD",
                 "ANDROID_KEYSTORE_BASE64"]
@@ -75,6 +78,7 @@ class World:
         self.accounts = {"sync-apps@silvernet-infra.iam.gserviceaccount.com"}
         self.policies = {}  # account -> bindings
         self.users = {}  # Play user -> {grant name's last part: permissions}
+        self.developer = {}  # Play user -> account-wide permissions
         self.drafts = set()
         self.fail = {}  # "METHOD path" -> HTTP status
         self.spec = PlaySpec()
@@ -86,12 +90,14 @@ class World:
             account = email(app["repository_id"])
             self.accounts.add(account)
             self.policies[account] = [{"role": ROLE, "members": [member(app["repository_id"])]}]
-            self.users[account] = {app["play"]["package"]: list(PERMISSIONS)}
+            self.users[account] = {app["play"]["package"]: list(STORED)}
             self.secrets[app["repo"]] = list(secrets) or ["ANDROID_KEYSTORE_BASE64"]
 
     def user(self, address):
         user = {"name": f"developers/{DEV}/users/{address}", "email": address,
                 "accessState": "ACCESS_GRANTED"}
+        if self.developer.get(address):
+            user["developerAccountPermissions"] = self.developer[address]
         if self.users[address]:
             user["grants"] = [
                 {"name": f"developers/{DEV}/users/{address}/grants/{name}",
@@ -146,9 +152,12 @@ class World:
         if path == USERS and method == "POST":
             body = request.json()
             self.spec.validate(body, "User")
-            assert body == {"name": f"developers/{DEV}/users/{body['email']}",
-                            "email": body["email"]}, body
+            assert set(body) <= {"name", "email", "developerAccountPermissions"}, body
+            assert body["name"] == f"developers/{DEV}/users/{body['email']}", body
+            if not body.get("developerAccountPermissions"):
+                return 400, {"error": {"code": 400, "message": "No permissions set for this user."}}
             self.users[body["email"]] = {}
+            self.developer[body["email"]] = body["developerAccountPermissions"]
             return 200, self.user(body["email"])
         if path.startswith(USERS + "/"):
             address, *rest = path[len(USERS) + 1:].split("/")
@@ -156,20 +165,29 @@ class World:
                 return refused(404)
             if method == "DELETE" and not rest:
                 del self.users[address]
+                self.developer.pop(address, None)
                 return 200, {}
+            if method == "PATCH" and not rest:
+                assert request.query == {"updateMask": "developerAccountPermissions"}
+                body = request.json()
+                self.spec.validate(body, "User")
+                if not body["developerAccountPermissions"] and not self.users[address]:
+                    return 400, {"error": {"code": 400, "message": "No permissions set for this user."}}
+                self.developer[address] = body["developerAccountPermissions"]
+                return 200, self.user(address)
             if method == "POST" and rest == ["grants"]:
                 body = request.json()
                 self.spec.validate(body, "Grant")
                 if body["packageName"] in self.drafts:
                     return 404, {"error": {"code": 404, "message": "Package not found."}}
-                self.users[address][body["packageName"]] = body["appLevelPermissions"]
+                self.users[address][body["packageName"]] = body["appLevelPermissions"] + IMPLIED
                 return 200, body
             if len(rest) == 2 and rest[0] == "grants" and rest[1] in self.users[address]:
                 if method == "PATCH":
                     assert request.query == {"updateMask": "appLevelPermissions"}
                     body = request.json()
                     self.spec.validate(body, "Grant")
-                    self.users[address][rest[1]] = body["appLevelPermissions"]
+                    self.users[address][rest[1]] = body["appLevelPermissions"] + IMPLIED
                     return 200, body
                 if method == "DELETE":
                     del self.users[address][rest[1]]
@@ -261,12 +279,14 @@ class SyncTest(unittest.TestCase):
             f"POST {IAM}/{account}:setIamPolicy",
             f"POST {USERS}",
             f"POST {USERS}/{account}/grants",
+            f"PATCH {USERS}/{account}",
         ])
         create = next(r for r in self.api.requests if r.method == "POST" and r.path == IAM)
         self.assertEqual(create.json(), {"accountId": "app-1001", "serviceAccount": {
             "displayName": f"Releases of {ORG}/TestAppOne (apps.yaml: one)"}})
         self.assertEqual(self.world.policies[account], [{"role": ROLE, "members": [member(1001)]}])
-        self.assertEqual(set(self.world.users[account]["com.example.one"]), set(PERMISSIONS))
+        self.assertEqual(set(self.world.users[account]["com.example.one"]), set(STORED))
+        self.assertEqual(self.world.developer[account], [])
 
         calls = self.tools()
         self.assertEqual([argv[0] for argv, _ in calls], ["keytool", "gh", "gh", "gh", "gh"])
@@ -331,7 +351,7 @@ class SyncTest(unittest.TestCase):
         self.world.app(ONE, settled=True)
         account = email(1001)
         self.world.users[account] = {
-            "com.example.one": PERMISSIONS + ["CAN_VIEW_NON_FINANCIAL_DATA"],
+            "com.example.one": STORED + ["CAN_REPLY_TO_REVIEWS"],
             "com.example.other": ["CAN_MANAGE_TRACK_APKS"],
         }
         result = self.sync({"one": ONE})
@@ -341,7 +361,7 @@ class SyncTest(unittest.TestCase):
             f"DELETE {USERS}/{account}/grants/com.example.other",
         ])
         self.assertEqual({k: set(v) for k, v in self.world.users[account].items()},
-                         {"com.example.one": set(PERMISSIONS)})
+                         {"com.example.one": set(STORED)})
 
     def test_draft_app_warns(self):
         self.world.app(ONE)
@@ -354,7 +374,24 @@ class SyncTest(unittest.TestCase):
         self.assertIn("::warning::one: com.example.one has no bundle in Play Console yet", result.stdout)
         self.assertIn("run Sync apps again", result.stdout)
         self.assertEqual(self.api.calls().count(f"POST {USERS}/{email(1001)}/grants"), 1)
-        self.assertEqual(set(self.world.users[email(1002)]["com.example.two"]), set(PERMISSIONS))
+        self.assertEqual(set(self.world.users[email(1002)]["com.example.two"]), set(STORED))
+
+    def test_new_user_for_draft_app_is_removed_again(self):
+        self.world.app(ONE)
+        self.world.secrets["TestAppOne"] = ["ANDROID_KEYSTORE_BASE64"]
+        self.world.drafts.add("com.example.one")
+        result = self.sync({"one": ONE})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn(email(1001), self.world.users)
+        self.assertIn("draft, user removed until then", result.stdout)
+
+    def test_leftover_account_wide_permissions_are_removed(self):
+        self.world.app(ONE, settled=True)
+        self.world.developer[email(1001)] = ["CAN_VIEW_APP_QUALITY_GLOBAL"]
+        result = self.sync({"one": ONE})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.mutations(), [f"PATCH {USERS}/{email(1001)}"])
+        self.assertEqual(self.world.developer[email(1001)], [])
 
     def test_play_refusal_fails_and_skips_revocation(self):
         self.world.app(ONE, settled=True)
@@ -366,7 +403,7 @@ class SyncTest(unittest.TestCase):
         result = self.sync({"one": ONE, "two": TWO})
         self.assertEqual(result.returncode, 1)
         self.assertIn("::error::one: Play refused (403)", result.stdout)
-        self.assertEqual(set(self.world.users[email(1002)]["com.example.two"]), set(PERMISSIONS))
+        self.assertEqual(set(self.world.users[email(1002)]["com.example.two"]), set(STORED))
         self.assertIn(email(999), self.world.accounts)
         self.assertIn("::warning::revocation skipped", result.stdout)
 

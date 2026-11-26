@@ -30,6 +30,12 @@ PROJECT_NUMBER = "389882651708"
 POOL = "releases"
 DEVELOPER = "8827645756827128332"
 PERMISSIONS = ["CAN_MANAGE_PUBLIC_APKS", "CAN_MANAGE_TRACK_APKS"]
+# Play adds these read-only permissions to every grant by itself.
+IMPLIED = {"CAN_VIEW_NON_FINANCIAL_DATA", "CAN_VIEW_APP_QUALITY"}
+# Play refuses to create a user without any permission, and a new user has no
+# grant yet, so it starts with this read-only one; the sync removes it once the
+# grant exists.
+STARTER = ["CAN_VIEW_APP_QUALITY_GLOBAL"]
 ROLE = "roles/iam.workloadIdentityUser"
 ACCOUNT = re.compile(r"^app-(\d+)@silvernet-infra\.iam\.gserviceaccount\.com$")
 KEYSTORE = re.compile(r"KEYSTORE|JKS")
@@ -188,7 +194,8 @@ class Sync:
             if user is None:
                 try:
                     user = call("POST", USERS, self.google,
-                                {"name": f"developers/{DEVELOPER}/users/{address}", "email": address},
+                                {"name": f"developers/{DEVELOPER}/users/{address}", "email": address,
+                                 "developerAccountPermissions": STARTER},
                                 **(PROPAGATING if created else {}))
                 except ApiError as error:
                     if not (created and error.status in (400, 404)):
@@ -212,13 +219,22 @@ class Sync:
                     self.warn(app["key"], f"{package} has no bundle in Play Console yet (draft app): the "
                               f"lead uploads the first bundle by hand, then {SYNC_AGAIN} to grant access")
                     done.append("draft")
-            elif set(grant.get("appLevelPermissions", [])) != set(PERMISSIONS):
+                    if "user created" in done:
+                        # Without a grant the user would keep only the starter permission.
+                        call("DELETE", f"{USERS}/{address}", self.google)
+                        done.append("user removed until then")
+            elif set(grant.get("appLevelPermissions", [])) - IMPLIED != set(PERMISSIONS):
                 call("PATCH", f"{USERS}/{address}/grants/{package}?updateMask=appLevelPermissions",
                      self.google, {"appLevelPermissions": PERMISSIONS})
                 done.append("updated")
             for other, stray in grants.items():
                 call("DELETE", f"{PLAY}/{stray['name']}", self.google)
                 done.append(f"grant on {other} removed")
+            # A user without any grant cannot lose its last permission.
+            if user.get("developerAccountPermissions") and "draft" not in done:
+                call("PATCH", f"{USERS}/{address}?updateMask=developerAccountPermissions", self.google,
+                     {"developerAccountPermissions": []})
+                done.append("account-wide permissions removed")
         except ApiError as error:
             if error.status != 403:
                 raise
