@@ -50,7 +50,7 @@ Then the lead implements the [task contract](task-contract.md), adds
 `ci.yml` and `release.yml` from [Continuous integration](ci.md) and
 [Releases](releases.md), adds Renovate, and picks the open-testing countries
 in Play Console once. For iOS, the lead answers export compliance and the age
-rating in App Store Connect ([per app](stores.md)); the app
+rating in App Store Connect ([per app](stores.md#per-app)); the app
 repository holds no App Store Connect key.
 
 A brand-new Play app has no package in the Play API until its first bundle is

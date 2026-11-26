@@ -2,6 +2,7 @@ name: Flutter release
 
 # Reusable: builds a release of a Flutter app and publishes it to the stores
 # and Pages; a pre-release goes to open testing, a release to production.
+# Infra's app-store.yml signs, uploads and submits the iOS build.
 
 on:
   workflow_call:
@@ -14,19 +15,10 @@ on:
         description: File name prefix of the release assets, e.g. `my-app` for my-app-1.2.0.aab.
         type: string
         default: ${{ github.event.repository.name }}
-      android-package:
-        description: Android application ID; turns on Google Play.
-        type: string
       android-keystore-path:
         description: Where the build expects the upload keystore, relative to app-dir.
         type: string
         default: android/app/key.jks
-      bundle-id:
-        description: iOS bundle ID; turns on the iOS build and App Store Connect.
-        type: string
-      apple-app-id:
-        description: The app's numeric Apple ID in App Store Connect (App Information), needed with bundle-id.
-        type: string
       play-beta-track:
         description: API name of the Google Play open testing track; Google names it `beta`, and other names are closed tracks.
         type: string
@@ -72,9 +64,6 @@ on:
         required: false
       ANDROID_STORE_PASSWORD:
         required: false
-      APP_STORE_CONNECT_KEY:
-        description: Contents of the App Store Connect API key (.p8), Admin role.
-        required: false
 
 permissions: {}
 
@@ -101,7 +90,33 @@ jobs:
       label: ${{ steps.version.outputs.label }}
       number: ${{ steps.version.outputs.number }}
       build-number: ${{ steps.version.outputs.build-number }}
+      android-package: ${{ steps.app.outputs.android-package }}
+      bundle-id: ${{ steps.app.outputs.bundle-id }}
+      apple-app-id: ${{ steps.app.outputs.apple-app-id }}
     steps:
+      # The store IDs come from apps.yaml at the Infra commit the caller pinned.
+      # A convenience, not the guard: each repository's Google account can only
+      # release its own package, whatever commit it pins.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .infra
+          persist-credentials: false
+          sparse-checkout: |
+            apps.yaml
+            scripts
+      - id: app
+        name: Look up the app in apps.yaml
+        env:
+          SHA: ${{ job.workflow_sha }}
+        run: |
+          yq -o=json .infra/apps.yaml > "$RUNNER_TEMP/apps.json"
+          app=$(python3 .infra/scripts/apps.py lookup "$RUNNER_TEMP/apps.json" --repository-id "$GITHUB_REPOSITORY_ID")
+          echo "$app" >> "$GITHUB_OUTPUT"
+          if grep -qx found=false <<< "$app"; then
+            echo "::warning::$GITHUB_REPOSITORY ($GITHUB_REPOSITORY_ID) is not in apps.yaml at $SHA: no store publishing. Add it in Infra and pin a newer commit."
+          fi
       - id: version
         name: Read the version from the tag
         env:
@@ -230,39 +245,30 @@ jobs:
             echo "build-number=$build_number"
           } >> "$GITHUB_OUTPUT"
           echo "$TAG: $mode ($channel, Google Play track $play_track), version $version, build $build_number" >> "$GITHUB_STEP_SUMMARY"
-      # Fail before any build when a store is half set up. Secrets kept in an
-      # environment only reach the jobs that name it; those jobs check them.
+      # Fail before any build when the signing is half set up. Secrets kept in
+      # an environment only reach the jobs that name it; those jobs check them.
       - if: ${{ steps.version.outputs.mode != 'skip' }}
-        name: Check the signing and store settings
+        name: Check the signing settings and the iOS runner
         env:
           BUILD: ${{ steps.version.outputs.mode == 'build' }}
           ANDROID_SIGNING: >-
             ${{ inputs.environment != '' || secrets.ANDROID_KEYSTORE_BASE64 != ''
             && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != ''
             && secrets.ANDROID_STORE_PASSWORD != '' }}
-          PLAY: ${{ inputs.android-package != '' && vars.GOOGLE_PLAY_SERVICE_ACCOUNT != '' }}
-          PLAY_PROVIDER: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
-          APP_STORE: ${{ inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != '' }}
-          APP_STORE_KEY: ${{ inputs.environment != '' || secrets.APP_STORE_CONNECT_KEY != '' }}
-          ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
-          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          APPLE_APP_ID: ${{ inputs.apple-app-id }}
+          MACOS_RUNNER: ${{ inputs.macos-runner }}
+          XCODE_VERSION: ${{ inputs.xcode-version }}
         run: |
           status=0
-          missing() { echo "::error::$1"; status=1; }
+          fail() { echo "::error::$1"; status=1; }
           if [ "$BUILD" = true ] && [ "$ANDROID_SIGNING" != true ]; then
-            missing "Pass the ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD and ANDROID_STORE_PASSWORD secrets to sign the Android builds."
+            fail "Pass the ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD and ANDROID_STORE_PASSWORD secrets to sign the Android builds."
           fi
-          if [ "$PLAY" = true ] && [ -z "$PLAY_PROVIDER" ]; then
-            missing "Set the GOOGLE_WORKLOAD_IDENTITY_PROVIDER variable for Google Play."
+          # They become the iOS archive's runs-on and DEVELOPER_DIR.
+          if [[ ! $MACOS_RUNNER =~ ^macos-[0-9a-z.-]+$ ]]; then
+            fail "macos-runner is a GitHub macOS runner label such as macos-26, not '$MACOS_RUNNER'."
           fi
-          if [ "$APP_STORE" = true ]; then
-            [ "$APP_STORE_KEY" = true ] || missing "Pass the APP_STORE_CONNECT_KEY secret for App Store Connect."
-            [ -n "$ISSUER_ID" ] || missing "Set the APP_STORE_CONNECT_ISSUER_ID variable for App Store Connect."
-            if [ "$BUILD" = true ]; then
-              [ -n "$TEAM_ID" ] || missing "Set the APPLE_TEAM_ID variable to sign the iOS app."
-              [ -n "$APPLE_APP_ID" ] || missing "Pass the apple-app-id input to upload the iOS app."
-            fi
+          if [[ ! $XCODE_VERSION =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            fail "xcode-version is a version such as 26.6, not '$XCODE_VERSION'."
           fi
           exit "$status"
 
@@ -484,7 +490,7 @@ jobs:
     name: Google Play
     needs: [plan, publish, promote]
     if: >-
-      ${{ !cancelled() && inputs.android-package != '' && vars.GOOGLE_PLAY_SERVICE_ACCOUNT != ''
+      ${{ !cancelled() && needs.plan.outputs.android-package != ''
       && needs.plan.outputs.android == 'true'
       && (needs.publish.result == 'success' || needs.promote.result == 'success') }}
     runs-on: ubuntu-24.04
@@ -530,8 +536,10 @@ jobs:
       - id: auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
-          workload_identity_provider: ${{ vars.GOOGLE_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+          workload_identity_provider: projects/389882651708/locations/global/workloadIdentityPools/releases/providers/flutter-release
+          # The calling repository's own account: only its tokens can use it, and
+          # Play lets it release only its apps.yaml package (sync-apps.yml).
+          service_account: app-${{ github.repository_id }}@silvernet-infra.iam.gserviceaccount.com
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/androidpublisher
           create_credentials_file: false
@@ -540,7 +548,7 @@ jobs:
         env:
           ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           GH_TOKEN: ${{ github.token }}
-          PACKAGE_NAME: ${{ inputs.android-package }}
+          PACKAGE_NAME: ${{ needs.plan.outputs.android-package }}
           BUNDLE_PATH: dist/${{ inputs.artifact-prefix }}-${{ needs.plan.outputs.tag }}.aab
           MODE: ${{ needs.plan.outputs.mode }}
           TRACK: ${{ needs.plan.outputs.play-track }}
@@ -553,7 +561,7 @@ jobs:
   ios-archive:
     name: iOS archive
     needs: plan
-    if: ${{ needs.plan.outputs.mode == 'build' && inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != '' }}
+    if: ${{ needs.plan.outputs.mode == 'build' && needs.plan.outputs.bundle-id != '' }}
     runs-on: ${{ inputs.macos-runner }}
     timeout-minutes: 60
     permissions:
@@ -592,9 +600,10 @@ jobs:
       - name: Archive
         working-directory: ${{ inputs.app-dir }}
         env:
-          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          # Ad hoc signing only; Infra's app-store.yml signs for distribution.
+          TEAM_ID: MZMZBQPXAR
         # Signed ad hoc, which keeps the entitlements without a development
-        # certificate; the export signs it for distribution.
+        # certificate.
         run: |
           mise x -- flutter build ios --release --config-only --no-codesign
           xcrun xcodebuild archive \
@@ -635,147 +644,102 @@ jobs:
           name: ios-archive
           path: ${{ inputs.app-dir }}/build/ios/archive/Runner.xcarchive.tar
           if-no-files-found: error
-          # Long enough to re-run the upload after a blocked App Store Connect.
+          # Long enough for Infra to re-run the upload after a blocked App Store Connect.
           retention-days: 7
 
-  ios-upload:
-    name: Upload to App Store Connect
-    needs: [plan, ios-archive]
-    runs-on: ${{ inputs.macos-runner }}
-    timeout-minutes: 30
-    environment: ${{ inputs.environment }}
-    # Holds the App Store Connect key and runs no project build code.
-    concurrency:
-      group: app-store
-      cancel-in-progress: false
-      queue: max
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_${{ inputs.xcode-version }}.app/Contents/Developer
-    steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ios-archive
-          path: ${{ runner.temp }}
-      - name: Sign and upload
-        env:
-          KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
-          ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
-          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
-          TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
-          APPLE_APP_ID: ${{ inputs.apple-app-id }}
-          BUNDLE_ID: ${{ inputs.bundle-id }}
-          PUSH: ${{ needs.ios-archive.outputs.push }}
-          VERSION: ${{ needs.plan.outputs.version }}
-          BUILD_NUMBER: ${{ needs.plan.outputs.build-number }}
-        run: |
-          # The archive comes from a job that runs build code: keep the key in a
-          # directory of its own that none of the archive's entries can lead to.
-          keys=$(mktemp -d)
-          trap 'rm -rf "$keys"' EXIT
-          printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$keys/AuthKey_${KEY_ID}.p8"
-          unset KEY # the tools below only need the file
-          mkdir "$RUNNER_TEMP/work"
-          cd "$RUNNER_TEMP/work"
-          tar -xf ../Runner.xcarchive.tar
-          cat > ExportOptions.plist <<EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0"><dict>
-            <key>method</key><string>app-store-connect</string>
-            <key>destination</key><string>export</string>
-            <key>teamID</key><string>${TEAM_ID}</string>
-            <key>signingStyle</key><string>automatic</string>
-            <key>manageAppVersionAndBuildNumber</key><false/>
-            <key>uploadSymbols</key><true/>
-          </dict></plist>
-          EOF
-          # Cloud signing: the distribution certificate stays with Apple.
-          xcrun xcodebuild -exportArchive \
-            -archivePath Runner.xcarchive -exportPath export \
-            -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates \
-            -authenticationKeyPath "$keys/AuthKey_${KEY_ID}.p8" \
-            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
-          if [ "$PUSH" = true ]; then
-            unzip -q export/*.ipa -d ipa
-            codesign -d --entitlements entitlements.plist --xml ipa/Payload/Runner.app
-            if [ "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' entitlements.plist)" != production ]; then
-              echo "::error::The exported app is not signed for production push notifications."
-              exit 1
-            fi
-          fi
-          # Xcode 26's altool can exit 0 after a failed upload; check its output too.
-          # No --wait: the Linux app-store job waits for processing, at a tenth
-          # of the macOS minute price.
-          API_PRIVATE_KEYS_DIR="$keys" xcrun altool --upload-package export/*.ipa \
-            --platform ios --apple-id "$APPLE_APP_ID" --bundle-id "$BUNDLE_ID" \
-            --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$VERSION" \
-            --api-key "$KEY_ID" --api-issuer "$ISSUER_ID" 2>&1 | tee altool.log
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ] || grep -qE 'UPLOAD FAILED|Failed to upload' altool.log; then
-            echo "::error::altool did not upload the build (exit $status); see its output above."
-            exit 1
-          fi
-
-  app-store:
-    # Gives a pre-release's TestFlight build to its testers; submits a release or
-    # a promoted pre-release for App Review.
-    name: App Store Connect
-    needs: [plan, ios-upload, promote]
+  app-store-request:
+    # Infra's app-store.yml finds this artifact, checks it against apps.yaml on
+    # its main branch, then uploads the archive and submits it with its own key.
+    name: Request the App Store upload
+    needs: [plan, ios-archive, promote]
     if: >-
-      ${{ !cancelled() && inputs.bundle-id != '' && vars.APP_STORE_CONNECT_KEY_ID != ''
+      ${{ !cancelled() && needs.plan.outputs.bundle-id != ''
       && needs.plan.outputs.ios == 'true'
-      && (needs.ios-upload.result == 'success' || needs.promote.result == 'success') }}
+      && (needs.ios-archive.result == 'success' || needs.promote.result == 'success') }}
     runs-on: ubuntu-24.04
-    # Waits for App Store Connect to process a new upload.
-    timeout-minutes: 90
+    timeout-minutes: 5
+    # An environment with required reviewers also asks for approval here. Infra
+    # does not check it: it checks that the request comes from the tag's own
+    # release.yml run.
     environment: ${{ inputs.environment }}
-    concurrency:
-      group: app-store
-      cancel-in-progress: false
-      queue: max
-    permissions:
-      contents: read # read the release notes and the scripts
+    permissions: {}
     steps:
-      # The job may have waited behind other releases' store jobs: check the
-      # live state again before changing anything.
-      - if: ${{ needs.plan.outputs.mode == 'promote' && needs.plan.outputs.manual != 'true' }}
-        name: Check that the release is still a release
+      - name: Write the request
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.plan.outputs.tag }}
-        run: |
-          if [ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease)" != false ]; then
-            echo "::error::$TAG is a pre-release again; not promoting it."
-            exit 1
-          fi
-      # The scripts of the workflow version the caller pinned.
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: .infra
-          persist-credentials: false
-          sparse-checkout: scripts
-      - name: Finish the upload
-        env:
-          KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
-          ISSUER_ID: ${{ vars.APP_STORE_CONNECT_ISSUER_ID }}
-          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
-          GH_TOKEN: ${{ github.token }}
-          BUNDLE_ID: ${{ inputs.bundle-id }}
           MODE: ${{ needs.plan.outputs.mode }}
+          MANUAL: ${{ needs.plan.outputs.manual }}
           CHANNEL: ${{ needs.plan.outputs.channel }}
           TAG: ${{ needs.plan.outputs.tag }}
           VERSION: ${{ needs.plan.outputs.version }}
           BUILD_NUMBER: ${{ needs.plan.outputs.build-number }}
+          PUSH: ${{ needs.ios-archive.outputs.push }}
           USES_NON_EXEMPT_ENCRYPTION: ${{ vars.APP_STORE_USES_NON_EXEMPT_ENCRYPTION }}
         run: |
-          KEY_PATH="$RUNNER_TEMP/AuthKey_${KEY_ID}.p8"
-          export KEY_PATH
-          trap 'rm -f "$KEY_PATH"' EXIT
-          printf '%s\n' "${KEY:?Pass the APP_STORE_CONNECT_KEY secret}" > "$KEY_PATH"
-          unset KEY # the script only needs the file
-          python3 .infra/scripts/app_store_submit.py
+          mkdir request
+          jq -n '{mode: env.MODE, manual: (env.MANUAL == "true"), channel: env.CHANNEL,
+            tag: env.TAG, version: env.VERSION, build_number: env.BUILD_NUMBER,
+            push: (env.PUSH == "true"), uses_non_exempt_encryption: env.USES_NON_EXEMPT_ENCRYPTION}' \
+            | tee request/request.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: app-store-request
+          path: request/request.json
+          if-no-files-found: error
+          # Infra's finder looks back three days.
+          retention-days: 3
+          overwrite: true
+
+  app-store:
+    # Mirrors the result of Infra's run for this request.
+    name: App Store (Infra)
+    needs: app-store-request
+    # app-store-request always has a skipped need (ios-archive or promote).
+    if: ${{ !cancelled() && needs.app-store-request.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions: {}
+    steps:
+      - name: Wait for Infra's App Store run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export TITLE="App Store $GITHUB_REPOSITORY run $GITHUB_RUN_ID"
+          api="repos/SilverNETGroupSGGW/Infra/actions/workflows/app-store.yml/runs?event=workflow_dispatch&per_page=50"
+          # Newest first: a re-dispatched run replaces an older one.
+          query='first(.workflow_runs[] | select(.display_title == env.TITLE)) | "\(.status) \(.conclusion) \(.html_url)"'
+          # Infra's finder dispatches the run within about 15 minutes; the run
+          # itself takes up to two hours behind other releases of the app.
+          find_deadline=$((SECONDS + 45 * 60))
+          deadline=$((SECONDS + 170 * 60))
+          url=
+          echo "Waiting for \"$TITLE\" in Infra's App Store workflow."
+          while :; do
+            # A failed request is retried at the next poll.
+            if run=$(gh api "$api" --jq "$query") && [ -n "$run" ]; then
+              read -r status conclusion run_url <<< "$run"
+              if [ -z "$url" ]; then
+                url=$run_url
+                echo "Infra's App Store run: $url" | tee -a "$GITHUB_STEP_SUMMARY"
+              fi
+              if [ "$status" = completed ]; then
+                if [ "$conclusion" = success ]; then
+                  echo "Ended by success: $url"
+                  exit 0
+                fi
+                echo "::error::Ended by failure: Infra's App Store run ended with $conclusion: $url. An Infra admin re-runs it; then re-run this job."
+                exit 1
+              fi
+            fi
+            if [ -z "$url" ] && ((SECONDS >= find_deadline)); then
+              echo "::error::Ended by deadline: no \"$TITLE\" run in Infra after 45 minutes. The finder is late, or the app has no app_store entry on Infra main."
+              exit 1
+            fi
+            if ((SECONDS >= deadline)); then
+              echo "::error::Ended by deadline: $url has not finished after 170 minutes."
+              exit 1
+            fi
+            sleep 60
+          done
 
   pages:
     name: GitHub Pages
