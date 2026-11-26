@@ -7,11 +7,13 @@ __pycache__/
 .DS_Store
 .idea/
 
-# Terraform working files; the module's callers keep their own lock files
+# Leftovers of local Terraform runs from before its removal: provider
+# binaries (over GitHub's 100 MB limit), lock files and state copies
 .terraform/
 terraform/app-release/.terraform.lock.hcl
-# Local state copies, saved plans and the GitHub App's private key
 *.tfstate
 *.tfstate.*
 tfplan
+
+# GitHub App private keys
 *.pem

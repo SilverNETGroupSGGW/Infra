@@ -4,7 +4,8 @@ How an app calls [`flutter-release.yml`](../.github/workflows/flutter-release.ym
 and, to redeploy Pages by hand,
 [`flutter-pages.yml`](../.github/workflows/flutter-pages.yml).
 
-`.github/workflows/release.yml` in the app:
+`.github/workflows/release.yml` in the app (Infra's App Store publisher only
+takes requests from a workflow with this file name):
 
 ```yaml
 name: Release
@@ -49,12 +50,10 @@ jobs:
       contents: write # attach the builds to the release
       id-token: write # Google Play (Workload Identity Federation) and Pages
       pages: write # publish the web app
-    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-release.yml@<commit-sha> # v1.0.0
+    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-release.yml@<commit-sha> # v2.0.0
+    # Store IDs come from apps.yaml in Infra
     with:
       app-dir: app
-      android-package: com.example.myapp # turns on Google Play
-      bundle-id: com.example.myapp # turns on iOS and App Store Connect
-      apple-app-id: "1234567890"
       pages: true
       publish-track: ${{ inputs.track }}
       publish-platforms: ${{ inputs.platforms }}
@@ -63,7 +62,6 @@ jobs:
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
-      APP_STORE_CONNECT_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
 ```
 
 Pass the secrets one by one rather than with `secrets: inherit`, so the
@@ -73,31 +71,27 @@ workflow only gets what it uses.
 | --- | --- | --- |
 | `app-dir` | `.` | Directory of the Flutter app |
 | `artifact-prefix` | repository name | File name prefix of the release assets: `<prefix>-<tag>.aab`, `<prefix>-<tag>-web.zip`, ... |
-| `android-package` | | Android application ID; turns on Google Play |
 | `android-keystore-path` | `android/app/key.jks` | Where the build reads the upload keystore, relative to `app-dir` |
-| `bundle-id`, `apple-app-id` | | iOS bundle ID and the app's numeric Apple ID (App Store Connect, App Information); `bundle-id` turns on the iOS build and App Store Connect |
 | `play-beta-track` | `beta` | API name of the open testing track; Google names it `beta`, and custom names such as `openBeta` are closed testing tracks |
 | `publish-track`, `publish-platforms` | | Manual runs: where to publish the release's builds (below) |
 | `play-notes-language` | `en-US` | Language of the Google Play release notes; one of the store listing's languages |
 | `pages` | `false` | Deploy the web builds to GitHub Pages once Pages is enabled for the repository |
 | `environment` | | Environment of the jobs that use signing or store credentials, e.g. one with required reviewers |
 | `build-tools` | `flutter,java` | mise tools the Android and web builds install |
-| `macos-runner`, `xcode-version`, `mise-version` | `macos-26`, `26.6`, newest release | |
+| `macos-runner`, `xcode-version`, `mise-version` | `macos-26`, `26.6`, newest release | Runner and Xcode of the iOS archive only; Infra picks its own for the upload |
 
-The workflow reads these repository (or organization) variables of the app:
+The workflow reads one repository (or organization) variable of the app:
+`APP_STORE_USES_NON_EXEMPT_ENCRYPTION`, the optional export compliance answer,
+`false` or `true` ([setup](stores.md#app-store-connect)).
 
-| Variable | |
-| --- | --- |
-| `GOOGLE_WORKLOAD_IDENTITY_PROVIDER`, `GOOGLE_PLAY_SERVICE_ACCOUNT` | Google Play sign-in ([setup](stores.md#google-play)) |
-| `APP_STORE_CONNECT_KEY_ID`, `APP_STORE_CONNECT_ISSUER_ID`, `APPLE_TEAM_ID` | App Store Connect sign-in and signing ([setup](stores.md#app-store-connect)) |
-| `APP_STORE_USES_NON_EXEMPT_ENCRYPTION` | Optional export compliance answer, `false` or `true` |
-
-A store's jobs run when the app passes its store ID (`android-package`,
-`bundle-id`) and the store's service account or key ID variable is set, so
-organization-wide variables don't turn a store on for every app. A half-done
-setup (a missing secret, variable or `apple-app-id`) fails the run before
-anything is built; with `environment`, the jobs that use the secrets check
-them.
+The store IDs come from the app's entry in [`apps.yaml`](apps.md), read at
+the Infra commit the caller pins; the run looks the app up by its repository
+ID. Google Play runs when that entry has `play`, the iOS archive and the App
+Store request when it has `app_store`. An app without an entry still gets its
+builds attached to the release, but no store publishing and a warning: add
+the entry in Infra and pin a newer commit. Missing signing secrets fail the
+run before anything is built; with `environment`, the jobs that use the
+secrets check them.
 
 ## How a release flows
 
@@ -117,15 +111,30 @@ them.
   workflow builds signed per-ABI APKs, an App Bundle and the web app and
   attaches them to the release. Google Play gets the bundle on the open
   testing track, TestFlight gets the iOS build in a group with a public link
-  and sends it to Beta App Review (the link is in the run summary), and Pages
-  serves it under `/beta/`. A Play tester gets the highest build number among
-  the tracks they joined, production included.
+  and sends it to Beta App Review (the link is in the summary of Infra's App
+  Store run), and Pages serves it under `/beta/`. A Play tester gets the
+  highest build number among the tracks they joined, production included.
 - **Production:** publish a release without ticking "Set as a pre-release".
   Google Play gets it on the production track, App Review gets the iOS build
   (released once approved), and Pages serves it at the site root. An earlier
   version still waiting for App Review is withdrawn and replaced, as Google
   Play does; one that App Review has started stops the run. A production
   release older than the version a store already has stops that store's job.
+- **iOS:** a build archives the app, signed ad hoc. Each run that publishes
+  to iOS leaves an `app-store-request` artifact: build or promote, tag,
+  version and build number. Infra's
+  [`app-store.yml`](../.github/workflows/app-store.yml) looks for requests
+  every 10 minutes, so its run starts 10 to 15 minutes later. It takes the
+  bundle and Apple ID from `apps.yaml` on Infra `main` and checks that the
+  archive is that bundle at that version. Then it signs the archive for
+  distribution, uploads it and does the TestFlight or App Review step. The
+  app's "App Store (Infra)" job links that run in its summary and ends with
+  its result. An Infra admin re-runs a failed Infra run; "Re-run failed jobs"
+  in the app then picks up the new result. The finder only looks at release
+  runs from the last three days: a request from an older run, for example
+  one re-run later, is never found, and the app's job fails after 45 minutes.
+  An Infra admin then runs App Store by hand (Actions → App Store → Run
+  workflow) with the app's repository and the run's ID.
 - **Closed and internal tests** are not automated: upload the builds attached
   to a release in Play Console and App Store Connect.
 - **Promotion:** untick "Set as a pre-release" on a tested pre-release. The
@@ -144,9 +153,10 @@ them.
   (Google Play: up to 500 characters; App Store: "What's New" in every
   language).
 - **Re-runs:** "Re-run failed jobs" continues where a run stopped: an uploaded
-  bundle is not uploaded again, and an unfinished App Store submission is
-  completed. "Re-run all jobs" on a pre-release whose builds are attached stops
-  at once, since the stores refuse a build number twice.
+  bundle is not uploaded again. Re-running Infra's run completes an
+  unfinished App Store submission (above). "Re-run all jobs" on a pre-release
+  whose builds are attached stops at once, since the stores refuse a build
+  number twice.
 
 Don't enable immutable releases in the app repositories: the builds are
 attached after the release is published.
@@ -156,19 +166,45 @@ attached after the release is published.
 - `cache-mode: none`: nothing from the Actions cache, which other workflows
   can write, reaches a signed build.
 - Only the `publish` and `rename` jobs can write to the repository, and they
-  run no build code. The upload key is only in the Android job; the App Store
-  Connect key only in jobs that run no project build code.
-- Google Play uses Workload Identity Federation: no Google key is stored, and
-  the provider can require that the token comes from this workflow
-  ([Release setup with Terraform](terraform.md)).
+  run no build code. The upload key is only in the Android job.
+- The App Store Connect key never reaches an app repository: only Infra's
+  `app-store` environment holds it. Infra takes the bundle and Apple ID from
+  `apps.yaml` on its `main` branch, never from the request, and checks that
+  the request comes from the app's own `release.yml` run on the release's
+  tag, at the tag's commit.
+- Google Play uses Workload Identity Federation: no Google key is stored. One
+  shared provider accepts only tokens from this workflow in the organization's
+  tag runs, and each repository can use only its own account,
+  `app-<repository ID>@silvernet-infra.iam.gserviceaccount.com`, which Play
+  lets release only the package of its `apps.yaml` entry. The `apps.yaml`
+  lookup enforces none of this: a caller that pins another Infra commit still
+  gets only its own account.
 - Set `environment` to an environment with required reviewers to approve
-  releases: the Android, Google Play, iOS upload and App Store Connect jobs
-  each wait for an approval when they start. Release runs deploy from their
-  tag, so allow the release tags in the environment's deployment branches and
-  tags (for example the tag rule `*`). Environment secrets only reach jobs that
-  name the environment, under the names this workflow reads
-  (`ANDROID_KEYSTORE_BASE64`, ..., `APP_STORE_CONNECT_KEY`), whatever the
-  caller passes.
+  releases: the Android, Google Play and App Store request jobs each wait for
+  an approval when they start. Release runs deploy from their tag, so allow
+  the release tags in the environment's deployment branches and tags (for
+  example the tag rule `*`). Environment secrets only reach jobs that name the
+  environment, under the names this workflow reads
+  (`ANDROID_KEYSTORE_BASE64`, ...), whatever the caller passes. Infra does
+  not check the App Store approval: someone who can push a tag and edit
+  `release.yml` can skip it for their own app.
+
+## Moving to v2
+
+v2 takes the store IDs from `apps.yaml` and publishes iOS from Infra. In the
+app's `release.yml`:
+
+1. Make sure the app has an entry in [`apps.yaml`](apps.md), then pin v2.0.0.
+2. Remove the inputs `android-package`, `bundle-id` and `apple-app-id` (the
+   call fails on unknown inputs) and the `APP_STORE_CONNECT_KEY` secret.
+3. Keystore secrets under older names are mapped in `secrets:`, for example
+   `ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_JKS_BASE64 }}`.
+
+The variables `GOOGLE_WORKLOAD_IDENTITY_PROVIDER`,
+`GOOGLE_PLAY_SERVICE_ACCOUNT`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_ISSUER_ID` and `APPLE_TEAM_ID` and the
+`APP_STORE_CONNECT_KEY` secret are no longer read; delete them once a release
+went through. `APP_STORE_USES_NON_EXEMPT_ENCRYPTION` stays.
 
 ## Pages
 
@@ -190,7 +226,7 @@ jobs:
       contents: read # read the releases and their web builds
       pages: write # publish the site
       id-token: write # authenticate the Pages deployment (OIDC)
-    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-pages.yml@<commit-sha> # v1.0.0
+    uses: SilverNETGroupSGGW/Infra/.github/workflows/flutter-pages.yml@<commit-sha> # v2.0.0
 ```
 
 Enable Pages with "Source: GitHub Actions". Release runs deploy from their
