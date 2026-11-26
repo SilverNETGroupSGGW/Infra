@@ -1,0 +1,4 @@
+# Admins approve every change to the app registry and to what acts on it.
+/apps.yaml @ThePhaseless @FabianoIV @silvernetgroup
+/.github/ @ThePhaseless @FabianoIV @silvernetgroup
+/scripts/ @ThePhaseless @FabianoIV @silvernetgroup

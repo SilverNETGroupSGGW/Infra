@@ -1,0 +1,28 @@
+# Apps that may publish to the stores. An admin's review approves every change
+# (CODEOWNERS); sync-apps.yml applies it. Schema and how-to: docs/apps.md.
+plan_wzim: # Plan WZIM
+  repo: SilverTimetable2
+  repository_id: 123740161
+  play:
+    package: com.silvernet.silvertimetable
+  app_store:
+    bundle: com.silver.silvertimetable
+    apple_id: 1384573148
+dni_sggw: # Dni SGGW
+  repo: sggw_days
+  repository_id: 1132232110
+  play:
+    package: com.silvernet.sggw_days
+  app_store:
+    bundle: com.silver.sggw-days
+    apple_id: 6767240418
+bingownia: # Bingownia
+  repo: Bingownia
+  repository_id: 1353978751
+  play:
+    package: com.silver.bingownia
+studentou: # Studentou
+  repo: pou_student
+  repository_id: 1327710726
+  play:
+    package: com.silver.studentou

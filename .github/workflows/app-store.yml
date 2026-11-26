@@ -1,0 +1,370 @@
+name: App Store
+
+# Publishes the apps' iOS builds with the club's one App Store Connect key,
+# which only this repository's app-store environment holds. An app's release
+# run (flutter-release.yml) leaves an app-store-request artifact; the
+# scheduled find job dispatches this workflow once for each. The dispatched run
+# takes the bundle and Apple ID from apps.yaml on main, never from the app,
+# then signs, uploads and submits.
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+  && format('App Store {0} run {1}', inputs.repository, inputs.run-id)
+  || 'Find App Store requests' }}
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: The app's repository, e.g. SilverNETGroupSGGW/Bingownia.
+        type: string
+        required: true
+      run-id:
+        description: ID of the app's release run that left the app-store-request artifact.
+        type: string
+        required: true
+
+permissions: {}
+
+# Runs with the App Store Connect key must not restore anything from the
+# Actions cache.
+cache-mode: none
+
+jobs:
+  find:
+    name: Find requests
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: app-store
+    permissions:
+      actions: write # list this workflow's runs and dispatch it
+      contents: read # clone the repository
+    concurrency:
+      group: app-store-find
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Cone mode also checks out the root files, apps.yaml among them.
+          sparse-checkout: scripts
+      - id: token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.RELEASES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASES_APP_PRIVATE_KEY }}
+          # Every app's release runs, read only; a list of repositories would
+          # fail for all apps when one of them is gone.
+          owner: SilverNETGroupSGGW # zizmor: ignore[github-app]
+          permission-actions: read
+          permission-contents: read
+      - name: Dispatch new requests
+        env:
+          APP_TOKEN: ${{ steps.token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          INFRA_REPOSITORY: ${{ github.repository }}
+        run: |
+          export APPS_FILE="$RUNNER_TEMP/apps.json"
+          yq -o=json apps.yaml > "$APPS_FILE"
+          python3 scripts/app_store_queue.py
+
+  prepare:
+    name: Check the request
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: app-store
+    permissions:
+      contents: read # clone the repository
+    outputs:
+      repo: ${{ steps.app.outputs.repo }}
+      bundle-id: ${{ steps.app.outputs.bundle-id }}
+      apple-app-id: ${{ steps.app.outputs.apple-app-id }}
+      mode: ${{ steps.request.outputs.mode }}
+      manual: ${{ steps.request.outputs.manual }}
+      channel: ${{ steps.request.outputs.channel }}
+      tag: ${{ steps.request.outputs.tag }}
+      version: ${{ steps.request.outputs.version }}
+      build-number: ${{ steps.request.outputs.build-number }}
+      push: ${{ steps.request.outputs.push }}
+      uses-non-exempt-encryption: ${{ steps.request.outputs.uses-non-exempt-encryption }}
+    steps:
+      - name: Check the inputs
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+          RUN_ID: ${{ inputs.run-id }}
+        run: |
+          if [[ ! $REPOSITORY =~ ^SilverNETGroupSGGW/[A-Za-z0-9_.-]+$ ]] || [[ ! $RUN_ID =~ ^[0-9]+$ ]]; then
+            echo "::error::repository must be SilverNETGroupSGGW/<name> and run-id the number of the app's release run."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Cone mode also checks out the root files, apps.yaml among them.
+          sparse-checkout: scripts
+      - id: app
+        name: Look up the app in apps.yaml
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          yq -o=json apps.yaml > "$RUNNER_TEMP/apps.json"
+          python3 scripts/apps.py lookup "$RUNNER_TEMP/apps.json" --repo="${REPOSITORY#*/}" > "$RUNNER_TEMP/app.txt"
+          if ! grep -qx found=true "$RUNNER_TEMP/app.txt" || grep -qx bundle-id= "$RUNNER_TEMP/app.txt"; then
+            echo "::error::$REPOSITORY has no app_store section in apps.yaml on main."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/app.txt" >> "$GITHUB_OUTPUT"
+      - id: token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.RELEASES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASES_APP_PRIVATE_KEY }}
+          owner: SilverNETGroupSGGW
+          repositories: ${{ steps.app.outputs.repo }}
+          permission-actions: read
+          permission-contents: read
+      - id: request
+        name: Check the repository and the request
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOSITORY: SilverNETGroupSGGW/${{ steps.app.outputs.repo }}
+          REPOSITORY_ID: ${{ steps.app.outputs.repository-id }}
+          RUN_ID: ${{ inputs.run-id }}
+        run: |
+          # A repository deleted and created again under the same name has a new
+          # ID; the app's run looks for this run's title with GitHub's spelling.
+          found=$(gh api "repos/$REPOSITORY" --jq '"\(.id) \(.full_name)"')
+          if [ "$found" != "$REPOSITORY_ID $REPOSITORY" ]; then
+            echo "::error::GitHub has $found; apps.yaml has $REPOSITORY_ID $REPOSITORY."
+            exit 1
+          fi
+          # Only the app's own release workflow, never a fork's pull request run.
+          run=$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" \
+            --jq '[.path, .event, (.head_repository.id | tostring), .head_branch, .head_sha] | join(" ")')
+          read -r path event head_id head_branch head_sha <<< "$run"
+          case "$path $event $head_id" in
+            ".github/workflows/release.yml release $REPOSITORY_ID" | \
+              ".github/workflows/release.yml workflow_dispatch $REPOSITORY_ID") ;;
+            *)
+              echo "::error::Run $RUN_ID is not a release.yml run of $REPOSITORY ($run)."
+              exit 1
+              ;;
+          esac
+          gh run download "$RUN_ID" -R "$REPOSITORY" -n app-store-request -D "$RUNNER_TEMP/request"
+          # The tag pattern of flutter-release.yml's plan job.
+          semver='v?(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]?)\.(0|[1-9][0-9]?)(-([0-9A-Za-z.-]*[A-Za-z.-])?([1-9][0-9]?))?'
+          # \A and \z: jq's ^ and $ also match at line ends.
+          jq -r --arg semver "$semver" '
+            def matches($re): type == "string" and test("\\A(?:" + $re + ")\\z");
+            if (.mode | IN("build", "promote")) and (.channel | IN("beta", "prod"))
+              and (.tag | matches($semver)) and (.version | matches("[0-9]+\\.[0-9]+\\.[0-9]+"))
+              and (.tag | ltrimstr("v") | split("-")[0]) == .version
+              and (.build_number | matches("[0-9]{1,10}"))
+              and (.push | type == "boolean") and (.manual | type == "boolean")
+              and (.uses_non_exempt_encryption | IN("", "true", "false", true, false))
+            then "mode=\(.mode)", "manual=\(.manual)", "channel=\(.channel)", "tag=\(.tag)",
+              "version=\(.version)", "build-number=\(.build_number)", "push=\(.push)",
+              "uses-non-exempt-encryption=\(.uses_non_exempt_encryption)"
+            else error("request.json does not match the request format")
+            end' "$RUNNER_TEMP/request/request.json" > "$RUNNER_TEMP/request.txt"
+          cat "$RUNNER_TEMP/request.txt"
+          tag=$(sed -n 's/^tag=//p' "$RUNNER_TEMP/request.txt")
+          # The run must be the tag's own code, not a release.yml edited on a
+          # branch. refs/tags/ peels an annotated tag, and a branch named like
+          # the tag does not resolve here.
+          if [ "$head_branch" != "$tag" ] ||
+            [ "$(gh api "repos/$REPOSITORY/commits/refs/tags/$tag" --jq .sha)" != "$head_sha" ]; then
+            echo "::error::Run $RUN_ID ran on $head_branch at $head_sha, not on the tag $tag."
+            exit 1
+          fi
+          prerelease=$(gh release view "$tag" -R "$REPOSITORY" --json isPrerelease --jq .isPrerelease)
+          if grep -qx mode=promote "$RUNNER_TEMP/request.txt" &&
+            grep -qx manual=false "$RUNNER_TEMP/request.txt" && [ "$prerelease" != false ]; then
+            echo "::error::$tag is a pre-release; not promoting it."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/request.txt" >> "$GITHUB_OUTPUT"
+
+  upload:
+    name: Upload to App Store Connect
+    needs: prepare
+    if: needs.prepare.outputs.mode == 'build'
+    # Infra fixes the runner and Xcode: the app's run cannot pick where the key goes.
+    runs-on: macos-26
+    timeout-minutes: 30
+    environment: app-store
+    permissions: {}
+    # One App Store change at a time per app.
+    concurrency:
+      group: app-store-${{ needs.prepare.outputs.repo }}
+      cancel-in-progress: false
+      queue: max
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.RELEASES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASES_APP_PRIVATE_KEY }}
+          owner: SilverNETGroupSGGW
+          repositories: ${{ needs.prepare.outputs.repo }}
+          permission-actions: read
+      - name: Download and check the archive
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOSITORY: SilverNETGroupSGGW/${{ needs.prepare.outputs.repo }}
+          RUN_ID: ${{ inputs.run-id }}
+          BUNDLE_ID: ${{ needs.prepare.outputs.bundle-id }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build-number }}
+        run: |
+          gh run download "$RUN_ID" -R "$REPOSITORY" -n ios-archive -D "$RUNNER_TEMP"
+          mkdir "$RUNNER_TEMP/work"
+          cd "$RUNNER_TEMP/work"
+          # Only the archive: other entries could plant ipa/ or export/ for the next step.
+          tar -xf ../Runner.xcarchive.tar Runner.xcarchive
+          app=Runner.xcarchive/Products/Applications/Runner.app
+          plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$app/Info.plist"; }
+          if [ "$(plist CFBundleIdentifier)" != "$BUNDLE_ID" ] ||
+            [ "$(plist CFBundleShortVersionString)" != "$VERSION" ] ||
+            [ "$(plist CFBundleVersion)" != "$BUILD_NUMBER" ]; then
+            echo "::error::The archive is not $BUNDLE_ID $VERSION ($BUILD_NUMBER)."
+            exit 1
+          fi
+      - name: Sign and upload
+        env:
+          KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: 69a6de96-7490-47e3-e053-5b8c7c11a4d1
+          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          TEAM_ID: MZMZBQPXAR
+          APPLE_APP_ID: ${{ needs.prepare.outputs.apple-app-id }}
+          BUNDLE_ID: ${{ needs.prepare.outputs.bundle-id }}
+          PUSH: ${{ needs.prepare.outputs.push }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build-number }}
+        run: |
+          # The archive comes from a job that runs build code: keep the key in a
+          # directory of its own that none of the archive's entries can lead to.
+          keys=$(mktemp -d)
+          trap 'rm -rf "$keys"' EXIT
+          printf '%s\n' "${KEY:?Set the APP_STORE_CONNECT_KEY secret of the app-store environment}" > "$keys/AuthKey_${KEY_ID}.p8"
+          unset KEY # the tools below only need the file
+          cd "$RUNNER_TEMP/work"
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>export</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+            <key>uploadSymbols</key><true/>
+          </dict></plist>
+          EOF
+          # Cloud signing: the distribution certificate stays with Apple.
+          xcrun xcodebuild -exportArchive \
+            -archivePath Runner.xcarchive -exportPath export \
+            -exportOptionsPlist ExportOptions.plist -allowProvisioningUpdates \
+            -authenticationKeyPath "$keys/AuthKey_${KEY_ID}.p8" \
+            -authenticationKeyID "$KEY_ID" -authenticationKeyIssuerID "$ISSUER_ID"
+          # The export signs the app that the archive's own Info.plist names:
+          # check that app again, as altool will upload it.
+          unzip -q export/*.ipa -d ipa
+          shopt -s nullglob
+          apps=(ipa/Payload/*.app)
+          ipa_plist() { /usr/libexec/PlistBuddy -c "Print :$1" "${apps[0]}/Info.plist"; }
+          if [ "${#apps[@]}" -ne 1 ] || [ "$(ipa_plist CFBundleIdentifier)" != "$BUNDLE_ID" ] ||
+            [ "$(ipa_plist CFBundleShortVersionString)" != "$VERSION" ] ||
+            [ "$(ipa_plist CFBundleVersion)" != "$BUILD_NUMBER" ]; then
+            echo "::error::The exported IPA is not one app $BUNDLE_ID $VERSION ($BUILD_NUMBER)."
+            exit 1
+          fi
+          if [ "$PUSH" = true ]; then
+            codesign -d --entitlements entitlements.plist --xml "${apps[0]}"
+            if [ "$(/usr/libexec/PlistBuddy -c 'Print :aps-environment' entitlements.plist)" != production ]; then
+              echo "::error::The exported app is not signed for production push notifications."
+              exit 1
+            fi
+          fi
+          # Xcode 26's altool can exit 0 after a failed upload; check its output too.
+          # No --wait: the Linux submit job waits for processing, at a tenth
+          # of the macOS minute price.
+          API_PRIVATE_KEYS_DIR="$keys" xcrun altool --upload-package export/*.ipa \
+            --platform ios --apple-id "$APPLE_APP_ID" --bundle-id "$BUNDLE_ID" \
+            --bundle-version "$BUILD_NUMBER" --bundle-short-version-string "$VERSION" \
+            --api-key "$KEY_ID" --api-issuer "$ISSUER_ID" 2>&1 | tee altool.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ] || grep -qE 'UPLOAD FAILED|Failed to upload' altool.log; then
+            echo "::error::altool did not upload the build (exit $status); see its output above."
+            exit 1
+          fi
+
+  submit:
+    # Gives a pre-release's TestFlight build to its testers; submits a release or
+    # a promoted pre-release for App Review.
+    name: App Store Connect
+    needs: [prepare, upload]
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.upload.result != 'failure' }}
+    runs-on: ubuntu-24.04
+    # Waits for App Store Connect to process a new upload.
+    timeout-minutes: 90
+    environment: app-store
+    permissions:
+      contents: read # clone the repository
+    concurrency:
+      group: app-store-${{ needs.prepare.outputs.repo }}
+      cancel-in-progress: false
+      queue: max
+    steps:
+      - id: token
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
+        with:
+          client-id: ${{ vars.RELEASES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASES_APP_PRIVATE_KEY }}
+          owner: SilverNETGroupSGGW
+          repositories: ${{ needs.prepare.outputs.repo }}
+          permission-contents: read
+      # The job may have waited behind other runs of this app: check the live
+      # state again before changing anything.
+      - if: ${{ needs.prepare.outputs.mode == 'promote' && needs.prepare.outputs.manual != 'true' }}
+        name: Check that the release is still a release
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          REPOSITORY: SilverNETGroupSGGW/${{ needs.prepare.outputs.repo }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          if [ "$(gh release view "$TAG" --repo "$REPOSITORY" --json isPrerelease --jq .isPrerelease)" != false ]; then
+            echo "::error::$TAG is a pre-release again; not promoting it."
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: Finish the upload
+        env:
+          KEY_ID: ${{ vars.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: 69a6de96-7490-47e3-e053-5b8c7c11a4d1
+          KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          APP_REPOSITORY: SilverNETGroupSGGW/${{ needs.prepare.outputs.repo }}
+          BUNDLE_ID: ${{ needs.prepare.outputs.bundle-id }}
+          MODE: ${{ needs.prepare.outputs.mode }}
+          CHANNEL: ${{ needs.prepare.outputs.channel }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          BUILD_NUMBER: ${{ needs.prepare.outputs.build-number }}
+          USES_NON_EXEMPT_ENCRYPTION: ${{ needs.prepare.outputs.uses-non-exempt-encryption }}
+        run: |
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${KEY_ID}.p8"
+          export KEY_PATH
+          trap 'rm -f "$KEY_PATH"' EXIT
+          printf '%s\n' "${KEY:?Set the APP_STORE_CONNECT_KEY secret of the app-store environment}" > "$KEY_PATH"
+          unset KEY # the script only needs the file
+          python3 scripts/app_store_submit.py
