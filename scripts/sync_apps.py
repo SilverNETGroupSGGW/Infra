@@ -242,6 +242,14 @@ class Sync:
                        "permissions with Release to testing tracks and Release to production on "
                        f"{package} only, or check that sync-apps@ is an Admin there")
             done.append("refused")
+            if "user created" in done and "user removed until then" not in done:
+                # Without a grant the user would keep only the starter permission.
+                try:
+                    call("DELETE", f"{USERS}/{address}", self.google)
+                    done.append("user removed")
+                except ApiError as cleanup:
+                    self.error(app["key"], f"{address} keeps {STARTER[0]}: remove it in Play Console "
+                               f"(HTTP {cleanup.status})")
         row["play"] = ", ".join(done) or "ok"
 
     def keystore(self, app, row, repository):

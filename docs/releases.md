@@ -185,9 +185,10 @@ attached after the release is published.
   the release tags in the environment's deployment branches and tags (for
   example the tag rule `*`). Environment secrets only reach jobs that name the
   environment, under the names this workflow reads
-  (`ANDROID_KEYSTORE_BASE64`, ...), whatever the caller passes. Infra does
-  not check the App Store approval: someone who can push a tag and edit
-  `release.yml` can skip it for their own app.
+  (`ANDROID_KEYSTORE_BASE64`, ...), whatever the caller passes. Infra checks
+  none of these approvals, and the shared Google provider does not check the
+  environment: someone who can push a tag and edit `release.yml` can skip
+  them for their own app.
 
 ## Moving to v2
 

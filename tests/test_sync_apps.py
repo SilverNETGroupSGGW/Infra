@@ -407,6 +407,16 @@ class SyncTest(unittest.TestCase):
         self.assertIn(email(999), self.world.accounts)
         self.assertIn("::warning::revocation skipped", result.stdout)
 
+    def test_new_user_refused_grant_is_removed_again(self):
+        self.world.app(ONE, settled=True)
+        del self.world.users[email(1001)]
+        self.world.fail[f"POST {USERS}/{email(1001)}/grants"] = 403
+        result = self.sync({"one": ONE})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("::error::one: Play refused (403)", result.stdout)
+        self.assertNotIn(email(1001), self.world.users)
+        self.assertIn("user created, refused, user removed", result.stdout)
+
     def test_repository_id_mismatch(self):
         self.world.app(ONE)
         self.world.repos["TestAppOne"] = 5555
